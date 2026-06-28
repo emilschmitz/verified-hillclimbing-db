@@ -6,6 +6,12 @@ requires-python = ">=3.11"
 exclude-newer = "0001-01-01T00:00:00Z" # This has no effect and is included for backwards compatibility when using relative exclude-newer values.
 exclude-newer-span = "P7D"
 
+[manifest]
+members = [
+    "sql-transpiler",
+    "verified-hillclimbing-db",
+]
+
 [[package]]
 name = "colorama"
 version = "0.4.6"
@@ -68,6 +74,26 @@ wheels = [
 ]
 
 [[package]]
+name = "sql-transpiler"
+version = "0.1.0"
+source = { editable = "transpiler" }
+dependencies = [
+    { name = "sqlglot" },
+]
+
+[package.optional-dependencies]
+test = [
+    { name = "pytest" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "pytest", marker = "extra == 'test'", specifier = ">=9.1.1" },
+    { name = "sqlglot", specifier = ">=30.11.0" },
+]
+provides-extras = ["test"]
+
+[[package]]
 name = "sqlglot"
 version = "30.11.0"
 source = { registry = "https://pypi.org/simple" }
@@ -82,11 +108,11 @@ version = "0.1.0"
 source = { virtual = "." }
 dependencies = [
     { name = "pytest" },
-    { name = "sqlglot" },
+    { name = "sql-transpiler" },
 ]
 
 [package.metadata]
 requires-dist = [
     { name = "pytest", specifier = ">=9.1.1" },
-    { name = "sqlglot", specifier = ">=30.11.0" },
+    { name = "sql-transpiler", editable = "transpiler" },
 ]

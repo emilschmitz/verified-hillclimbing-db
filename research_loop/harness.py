@@ -8,13 +8,9 @@ import subprocess
 import argparse
 import shutil
 
-# Add parent directory to path so we can import the transpiler and check_ssb_queries
 CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
-PARENT_DIR = os.path.dirname(CURRENT_DIR)
-sys.path.append(PARENT_DIR)
 
-from transpiler import transpile_sql_to_dafny
-from check_ssb_queries import queries, schema
+from sql_transpiler import transpile_sql_to_dafny, queries, schema
 
 def load_env(env_path):
     env = {}

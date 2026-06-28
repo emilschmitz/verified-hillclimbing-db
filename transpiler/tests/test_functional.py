@@ -4,7 +4,7 @@ import tempfile
 import os
 import sqlite3
 import re
-from transpiler import transpile_sql_to_dafny, UnsupportedContractError, parse_sql
+from sql_transpiler import transpile_sql_to_dafny, UnsupportedContractError, parse_sql
 
 @unittest.skipIf(os.environ.get("RUN_SLOW") != "1", "Skipping slow Dafny functional tests. Run with RUN_SLOW=1 to execute.")
 class TestTranspilerFunctional(unittest.TestCase):

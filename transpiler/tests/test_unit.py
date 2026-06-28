@@ -1,5 +1,5 @@
 import unittest
-from transpiler import transpile_sql_to_dafny, UnsupportedContractError
+from sql_transpiler import transpile_sql_to_dafny, UnsupportedContractError
 
 class TestTranspilerUnit(unittest.TestCase):
     def setUp(self):
