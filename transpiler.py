@@ -53,6 +53,44 @@ class SQLQuery:
         self.agg_column: str = ""  # Column name or "*"
         self.groupby_column: str = None  # Group by column name, if any
         self.where_conditions: list[tuple[str, str, any, str]] = []  # list of (col, op, val, val_type)
+        self.agg_expr_dafny: str = ""
+
+def strip_alias(item: str) -> str:
+    """Strips the AS alias or implicit alias from select items."""
+    match = re.match(r'^(.*?)\s+(?:AS\s+)?([a-zA-Z_][a-zA-Z0-9_]*)$', item, re.IGNORECASE)
+    if match:
+        expr = match.group(1).strip()
+        if not expr.endswith(('+', '-', '*', '/')):
+            return expr
+    return item
+
+def parse_agg_expression(expr_str: str, schema_dict: dict[str, str]) -> tuple[str, list[str]]:
+    """Parses a SQL aggregation expression and maps column identifiers to row fields in Dafny."""
+    tokens = re.split(r'(\b[a-zA-Z_][a-zA-Z0-9_]*\b)', expr_str)
+    referenced_cols = []
+    dafny_parts = []
+    
+    for token in tokens:
+        if not token:
+            continue
+        if re.match(r'^[a-zA-Z_][a-zA-Z0-9_]*$', token):
+            if token.upper() in ('SUM', 'COUNT', 'AVG'):
+                raise UnsupportedContractError("Nested aggregates not supported.")
+            if token in schema_dict:
+                if schema_dict[token] != 'int':
+                    raise UnsupportedContractError(f"Column '{token}' in expression must be of type 'int'.")
+                referenced_cols.append(token)
+                dafny_parts.append(f"row.{token}")
+            else:
+                raise UnsupportedContractError(f"Identifier '{token}' not found in schema.")
+        else:
+            if not re.match(r'^[0-9\s*+\-/()]*$', token):
+                raise UnsupportedContractError(f"Unsupported characters/operators in expression: '{token}'")
+            dafny_parts.append(token)
+            
+    dafny_expr = "".join(dafny_parts).strip()
+    return dafny_expr, referenced_cols
+
 
 def parse_sql(sql_str: str, schema_dict: dict[str, str]) -> SQLQuery:
     """Parses a SQL statement within the supported dashboard contract boundary."""
@@ -115,7 +153,7 @@ def parse_sql(sql_str: str, schema_dict: dict[str, str]) -> SQLQuery:
         query.groupby_column = groupby_body
 
     # Validate and parse SELECT body
-    select_items = [item.strip() for item in select_body.split(',')]
+    select_items = [strip_alias(item.strip()) for item in select_body.split(',')]
     if query.groupby_column:
         if len(select_items) != 2:
             raise UnsupportedContractError("Query falls outside the supported dashboard subset.")
@@ -144,11 +182,10 @@ def parse_sql(sql_str: str, schema_dict: dict[str, str]) -> SQLQuery:
         if query.agg_column != '*':
             if query.agg_column not in schema_dict:
                 raise UnsupportedContractError(f"Aggregate column '{query.agg_column}' not found in schema.")
+        query.agg_expr_dafny = "1"
     else: # SUM or AVG
-        if query.agg_column not in schema_dict:
-            raise UnsupportedContractError(f"Aggregate column '{query.agg_column}' not found in schema.")
-        if schema_dict[query.agg_column] != 'int':
-            raise UnsupportedContractError(f"Aggregate column '{query.agg_column}' must be of type 'int'.")
+        dafny_expr, referenced_cols = parse_agg_expression(query.agg_column, schema_dict)
+        query.agg_expr_dafny = dafny_expr
             
     # 5. Parse WHERE conditions
     if where_body:
@@ -157,7 +194,7 @@ def parse_sql(sql_str: str, schema_dict: dict[str, str]) -> SQLQuery:
         for cond_str in conditions_raw:
             cond_str = cond_str.strip()
             # Match: column operator value
-            cond_match = re.match(r'^([a-zA-Z_][a-zA-Z0-9_]*)\s*(=|!=|<>|>|<)\s*(.*)$', cond_str)
+            cond_match = re.match(r'^([a-zA-Z_][a-zA-Z0-9_]*)\s*(=|!=|<>|>=|<=|>|<)\s*(.*)$', cond_str)
             if not cond_match:
                 raise UnsupportedContractError("Query falls outside the supported dashboard subset.")
             
@@ -236,7 +273,6 @@ def transpile_sql_to_dafny(sql_str: str, schema_dict: dict[str, str]) -> str:
     schema_dafny = f"datatype Row = Row({fields_str})"
 
     # 4. Determine key variables
-    agg_col = query.agg_column
     groupby_col = query.groupby_column
     
     # Construct WHERE clause condition for row
@@ -264,7 +300,7 @@ def transpile_sql_to_dafny(sql_str: str, schema_dict: dict[str, str]) -> str:
         # Else case
         if groupby_col:
             # GROUP BY recursive logic
-            term_expr = f"row.{agg_col}" if is_sum else "1"
+            term_expr = query.agg_expr_dafny if is_sum else "1"
             if where_expr:
                 else_body = (
                     f"var tailMap := {func_name}(data[1..]);\n"
@@ -286,7 +322,7 @@ def transpile_sql_to_dafny(sql_str: str, schema_dict: dict[str, str]) -> str:
                 )
         else:
             # Single aggregation recursive logic
-            term_expr = f"row.{agg_col}" if is_sum else "1"
+            term_expr = query.agg_expr_dafny if is_sum else "1"
             if where_expr:
                 else_body = (
                     f"var row := data[0];\n"
@@ -298,10 +334,7 @@ def transpile_sql_to_dafny(sql_str: str, schema_dict: dict[str, str]) -> str:
                 else_body = (
                     f"var row := data[0];\n"
                     f"var tail := data[1..];\n"
-                    f"row.{agg_col} + {func_name}(tail)" if is_sum else
-                    f"var row := data[0];\n"
-                    f"var tail := data[1..];\n"
-                    f"1 + {func_name}(tail)"
+                    f"{term_expr} + {func_name}(tail)"
                 )
                 
         return DafnyIf(cond, DafnyLiteral(then_val), DafnyLiteral(else_body))

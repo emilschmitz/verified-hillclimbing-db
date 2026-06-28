@@ -92,5 +92,39 @@ class TestTranspilerUnit(unittest.TestCase):
         with self.assertRaises(UnsupportedContractError):
             transpile_sql_to_dafny("SELECT category, SUM(value) FROM my_table GROUP BY category, age", self.schema)
 
+    def test_alias_support(self):
+        sql = "SELECT SUM(value) AS val_alias FROM my_table"
+        result = transpile_sql_to_dafny(sql, self.schema)
+        self.assertIn("datatype Row = Row(category: string, value: int, age: int, name: string)", result)
+        self.assertIn("function MethodSpec(data: seq<Row>): int", result)
+        self.assertIn("row.value + MethodSpec(tail)", result)
+
+        sql_implicit = "SELECT SUM(value) val_alias FROM my_table"
+        result_implicit = transpile_sql_to_dafny(sql_implicit, self.schema)
+        self.assertIn("row.value + MethodSpec(tail)", result_implicit)
+
+    def test_arithmetic_expressions(self):
+        sql = "SELECT SUM(value * age) FROM my_table"
+        result = transpile_sql_to_dafny(sql, self.schema)
+        self.assertIn("row.value * row.age + MethodSpec(tail)", result)
+
+        sql_complex = "SELECT SUM(value * (100 - age) / 2) FROM my_table"
+        result_complex = transpile_sql_to_dafny(sql_complex, self.schema)
+        self.assertIn("row.value * (100 - row.age) / 2 + MethodSpec(tail)", result_complex)
+
+    def test_ge_le_operators(self):
+        sql = "SELECT COUNT(*) FROM my_table WHERE age >= 21 AND value <= 100"
+        result = transpile_sql_to_dafny(sql, self.schema)
+        self.assertIn("row.age >= 21 && row.value <= 100", result)
+
+    def test_invalid_expressions_unsupported(self):
+        # Non-int columns in math
+        with self.assertRaises(UnsupportedContractError):
+            transpile_sql_to_dafny("SELECT SUM(value * category) FROM my_table", self.schema)
+        
+        # Invalid characters
+        with self.assertRaises(UnsupportedContractError):
+            transpile_sql_to_dafny("SELECT SUM(value @ age) FROM my_table", self.schema)
+
 if __name__ == '__main__':
     unittest.main()

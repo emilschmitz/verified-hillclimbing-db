@@ -8,3 +8,15 @@ wheels/
 
 # Virtual environments
 .venv
+
+# Scripts and temporary check files
+check_ssb_queries.py
+
+# Dafny compilation build artifacts
+*.cs
+*.csproj
+*.deps.json
+*.dll
+*.pdb
+*.runtimeconfig.json
+obj/

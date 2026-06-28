@@ -3,6 +3,7 @@ import subprocess
 import tempfile
 import os
 import sqlite3
+import re
 from transpiler import transpile_sql_to_dafny, UnsupportedContractError, parse_sql
 
 @unittest.skipIf(os.environ.get("RUN_SLOW") != "1", "Skipping slow Dafny functional tests. Run with RUN_SLOW=1 to execute.")
@@ -28,6 +29,23 @@ class TestTranspilerFunctional(unittest.TestCase):
     def evaluate_query_python(self, query_str):
         query = parse_sql(query_str, self.schema)
         
+        # Helper to evaluate math expression over a row
+        def eval_expr(expr_str, row):
+            expr_str = expr_str.replace('/', '//')
+            tokens = re.split(r'(\b[a-zA-Z_][a-zA-Z0-9_]*\b)', expr_str)
+            eval_parts = []
+            for token in tokens:
+                if not token:
+                    continue
+                if re.match(r'^[a-zA-Z_][a-zA-Z0-9_]*$', token):
+                    if token in row:
+                        eval_parts.append(str(row[token]))
+                    else:
+                        raise ValueError(f"Unknown column: {token}")
+                else:
+                    eval_parts.append(token)
+            return eval("".join(eval_parts))
+
         # 1. Filter rows
         filtered_rows = []
         for row in self.dummy_data:
@@ -47,6 +65,10 @@ class TestTranspilerFunctional(unittest.TestCase):
                     match = (row_val > right_val)
                 elif op == '<':
                     match = (row_val < right_val)
+                elif op == '>=':
+                    match = (row_val >= right_val)
+                elif op == '<=':
+                    match = (row_val <= right_val)
                 else:
                     match = False
                 
@@ -71,9 +93,9 @@ class TestTranspilerFunctional(unittest.TestCase):
             if query.agg_type == 'COUNT':
                 val = len(g_rows)
             elif query.agg_type == 'SUM':
-                val = sum(r[query.agg_column] for r in g_rows)
+                val = sum(eval_expr(query.agg_column, r) for r in g_rows)
             elif query.agg_type == 'AVG':
-                s = sum(r[query.agg_column] for r in g_rows)
+                s = sum(eval_expr(query.agg_column, r) for r in g_rows)
                 c = len(g_rows)
                 val = s // c if c > 0 else 0
             else:
@@ -231,6 +253,27 @@ method Main() {{
             self.verify_query("SELECT category, SUM(value) FROM my_table GROUP BY category")
         finally:
             self.dummy_data = orig
+
+    def test_functional_alias_support(self):
+        self.verify_query("SELECT SUM(value) AS val_alias FROM my_table")
+        self.verify_query("SELECT category, AVG(value) avg_val FROM my_table GROUP BY category")
+
+    def test_functional_arithmetic_expressions(self):
+        self.verify_query("SELECT SUM(value * age) FROM my_table")
+        self.verify_query("SELECT SUM(value * (100 - age) / 2) FROM my_table")
+        self.verify_query("SELECT category, SUM(value * 2) FROM my_table GROUP BY category")
+
+    def test_functional_operators_ge_le(self):
+        self.verify_query("SELECT COUNT(*) FROM my_table WHERE age >= 21 AND value <= 100")
+        self.verify_query("SELECT SUM(value) FROM my_table WHERE age <= 20")
+
+    def test_functional_ssb_flat_style_query(self):
+        # A star-schema-benchmark flat-style query
+        self.verify_query(
+            "SELECT SUM(value * age) AS total_val_age "
+            "FROM my_table "
+            "WHERE age >= 20 AND age <= 30 AND value >= 10"
+        )
 
 if __name__ == '__main__':
     unittest.main()
