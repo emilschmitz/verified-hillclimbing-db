@@ -1,4 +1,6 @@
 import re
+import sqlglot
+from sqlglot import exp
 
 class UnsupportedContractError(Exception):
     """Raised when a SQL query falls outside the supported dashboard subset."""
@@ -55,206 +57,211 @@ class SQLQuery:
         self.where_conditions: list[tuple[str, str, any, str]] = []  # list of (col, op, val, val_type)
         self.agg_expr_dafny: str = ""
 
-def strip_alias(item: str) -> str:
-    """Strips the AS alias or implicit alias from select items."""
-    match = re.match(r'^(.*?)\s+(?:AS\s+)?([a-zA-Z_][a-zA-Z0-9_]*)$', item, re.IGNORECASE)
-    if match:
-        expr = match.group(1).strip()
-        if not expr.endswith(('+', '-', '*', '/')):
-            return expr
-    return item
-
-def parse_agg_expression(expr_str: str, schema_dict: dict[str, str]) -> tuple[str, list[str]]:
-    """Parses a SQL aggregation expression and maps column identifiers to row fields in Dafny."""
-    tokens = re.split(r'(\b[a-zA-Z_][a-zA-Z0-9_]*\b)', expr_str)
-    referenced_cols = []
-    dafny_parts = []
-    
-    for token in tokens:
-        if not token:
-            continue
-        if re.match(r'^[a-zA-Z_][a-zA-Z0-9_]*$', token):
-            if token.upper() in ('SUM', 'COUNT', 'AVG'):
-                raise UnsupportedContractError("Nested aggregates not supported.")
-            if token in schema_dict:
-                if schema_dict[token] != 'int':
-                    raise UnsupportedContractError(f"Column '{token}' in expression must be of type 'int'.")
-                referenced_cols.append(token)
-                dafny_parts.append(f"row.{token}")
-            else:
-                raise UnsupportedContractError(f"Identifier '{token}' not found in schema.")
-        else:
-            if not re.match(r'^[0-9\s*+\-/()]*$', token):
-                raise UnsupportedContractError(f"Unsupported characters/operators in expression: '{token}'")
-            dafny_parts.append(token)
-            
-    dafny_expr = "".join(dafny_parts).strip()
-    return dafny_expr, referenced_cols
-
-
 def parse_sql(sql_str: str, schema_dict: dict[str, str]) -> SQLQuery:
-    """Parses a SQL statement within the supported dashboard contract boundary."""
-    # 1. Normalize whitespaces
-    sql_clean = " ".join(sql_str.strip().split())
-    
-    # 2. Extract string literals to avoid false keyword matching
-    literals = []
-    def replace_lit(match):
-        lit = match.group(0)
-        literals.append(lit)
-        return f"__LIT_{len(literals)-1}__"
-    
-    sql_placeholder = re.sub(r"'(?:''|[^'])*'|\"(?:\"\"|[^\"])*\"", replace_lit, sql_clean)
-    
-    # 3. Check for forbidden keywords / patterns case-insensitively on placeholder
-    sql_upper = sql_placeholder.upper()
-    
-    forbidden = [
-        r'\bJOIN\b', r'\bUNION\b', r'\bOR\b', r'\bHAVING\b', 
-        r'\bORDER\s+BY\b', r'\bLIMIT\b', r'\bIN\b', r'\bLIKE\b', 
-        r'\bBETWEEN\b', r'\bNOT\b', r'\bEXISTS\b', r'\bMIN\b', r'\bMAX\b'
-    ]
-    for pattern in forbidden:
-        if re.search(pattern, sql_upper):
-            raise UnsupportedContractError("Query falls outside the supported dashboard subset.")
-            
-    # Check for multiple SELECT, FROM, or GROUP BY to prevent subqueries or complex syntax
-    if len(re.findall(r'\bSELECT\b', sql_upper)) > 1:
-        raise UnsupportedContractError("Query falls outside the supported dashboard subset.")
-    if len(re.findall(r'\bGROUP\b', sql_upper)) > 1:
-        raise UnsupportedContractError("Query falls outside the supported dashboard subset.")
-    if len(re.findall(r'\bFROM\b', sql_upper)) > 1:
-        raise UnsupportedContractError("Query falls outside the supported dashboard subset.")
-        
-    # 4. Match overall query structure
-    pattern = r'^SELECT\s+(.*?)\s+FROM\s+(.*?)(?:\s+WHERE\s+(.*?))?(?:\s+GROUP\s+BY\s+(.*?))?$'
-    match = re.match(pattern, sql_placeholder, re.IGNORECASE)
-    if not match:
-        raise UnsupportedContractError("Query falls outside the supported dashboard subset.")
-        
-    select_body = match.group(1).strip()
-    from_body = match.group(2).strip()
-    where_body = match.group(3).strip() if match.group(3) else None
-    groupby_body = match.group(4).strip() if match.group(4) else None
-    
-    # Validate FROM clause (only a single table identifier)
-    if not re.match(r'^[a-zA-Z_][a-zA-Z0-9_]*$', from_body):
-        raise UnsupportedContractError("Query falls outside the supported dashboard subset.")
-        
-    query = SQLQuery()
-    query.table = from_body
-    
-    # Validate and parse GROUP BY (only a single column identifier)
-    if groupby_body:
-        if not re.match(r'^[a-zA-Z_][a-zA-Z0-9_]*$', groupby_body):
-            raise UnsupportedContractError("Query falls outside the supported dashboard subset.")
-        if groupby_body not in schema_dict:
-            raise UnsupportedContractError(f"Group by column '{groupby_body}' not found in schema.")
-        query.groupby_column = groupby_body
+    """Parses a SQL statement within the supported dashboard contract boundary using sqlglot."""
+    # Build a case-insensitive schema mapping to match columns correctly and preserve their original case
+    schema_resolved = {k.lower(): (k, v) for k, v in schema_dict.items()}
 
-    # Validate and parse SELECT body
-    select_items = [strip_alias(item.strip()) for item in select_body.split(',')]
+    try:
+        expression = sqlglot.parse_one(sql_str)
+    except Exception as e:
+        raise UnsupportedContractError(f"Query parsing failed: {e}")
+
+    if not isinstance(expression, exp.Select):
+        raise UnsupportedContractError("Query falls outside the supported dashboard subset.")
+
+    # 1. Check for forbidden node types (JOINs, UNIONs, subqueries, complex predicates)
+    for node in expression.walk():
+        if isinstance(node, (
+            exp.Join, exp.Union, exp.Subquery, exp.Having, exp.Order, 
+            exp.Limit, exp.Exists, exp.In, exp.Like, exp.Between,
+            exp.Max, exp.Min, exp.Distinct
+        )):
+            raise UnsupportedContractError("Query falls outside the supported dashboard subset.")
+
+    # 2. FROM clause validation
+    from_clause = expression.args.get("from_")
+    if not from_clause:
+        raise UnsupportedContractError("Query must have a FROM clause.")
+    if not isinstance(from_clause.this, exp.Table):
+        raise UnsupportedContractError("Query falls outside the supported dashboard subset.")
+    table_name = from_clause.this.name
+
+    query = SQLQuery()
+    query.table = table_name
+
+    # 3. GROUP BY clause validation
+    groupby_clause = expression.args.get("group")
+    if groupby_clause:
+        groupby_exprs = groupby_clause.expressions
+        if len(groupby_exprs) != 1:
+            raise UnsupportedContractError("Query falls outside the supported dashboard subset.")
+        groupby_node = groupby_exprs[0]
+        if not isinstance(groupby_node, exp.Column):
+            raise UnsupportedContractError("Query falls outside the supported dashboard subset.")
+        groupby_col_lower = groupby_node.name.lower()
+        if groupby_col_lower not in schema_resolved:
+            raise UnsupportedContractError(f"Group by column '{groupby_node.name}' not found in schema.")
+        query.groupby_column = schema_resolved[groupby_col_lower][0]
+
+    # Helper to strip alias
+    def unwrap_alias(node):
+        if isinstance(node, exp.Alias):
+            return node.this
+        return node
+
+    # 4. SELECT items validation
+    select_items = expression.expressions
     if query.groupby_column:
         if len(select_items) != 2:
             raise UnsupportedContractError("Query falls outside the supported dashboard subset.")
-        # One must be the group by column, the other the aggregation
-        if select_items[0] == query.groupby_column:
-            agg_item = select_items[1]
-        elif select_items[1] == query.groupby_column:
-            agg_item = select_items[0]
-        else:
+        unwrapped = [unwrap_alias(item) for item in select_items]
+        
+        col_node = None
+        agg_node = None
+        for item in unwrapped:
+            if isinstance(item, exp.Column) and item.name.lower() == query.groupby_column.lower():
+                col_node = item
+            elif isinstance(item, (exp.Sum, exp.Count, exp.Avg)):
+                agg_node = item
+        if not col_node or not agg_node:
             raise UnsupportedContractError("Query select clause must include the group by column.")
     else:
         if len(select_items) != 1:
             raise UnsupportedContractError("Query falls outside the supported dashboard subset.")
-        agg_item = select_items[0]
-        
-    # Match the aggregation expression
-    agg_match = re.match(r'^(SUM|COUNT|AVG)\s*\(\s*(.*?)\s*\)$', agg_item, re.IGNORECASE)
-    if not agg_match:
-        raise UnsupportedContractError("Query falls outside the supported dashboard subset.")
-        
-    query.agg_type = agg_match.group(1).upper()
-    query.agg_column = agg_match.group(2).strip()
-    
-    # Validate aggregation column
-    if query.agg_type == 'COUNT':
-        if query.agg_column != '*':
-            if query.agg_column not in schema_dict:
-                raise UnsupportedContractError(f"Aggregate column '{query.agg_column}' not found in schema.")
-        query.agg_expr_dafny = "1"
-    else: # SUM or AVG
-        dafny_expr, referenced_cols = parse_agg_expression(query.agg_column, schema_dict)
-        query.agg_expr_dafny = dafny_expr
-            
-    # 5. Parse WHERE conditions
-    if where_body:
-        # Split on AND, keeping word boundaries
-        conditions_raw = re.split(r'\bAND\b', where_body, flags=re.IGNORECASE)
-        for cond_str in conditions_raw:
-            cond_str = cond_str.strip()
-            # Match: column operator value
-            cond_match = re.match(r'^([a-zA-Z_][a-zA-Z0-9_]*)\s*(=|!=|<>|>=|<=|>|<)\s*(.*)$', cond_str)
-            if not cond_match:
+        agg_node = unwrap_alias(select_items[0])
+        if not isinstance(agg_node, (exp.Sum, exp.Count, exp.Avg)):
+            raise UnsupportedContractError("Query falls outside the supported dashboard subset.")
+
+    # Helper to recursively compile expression to Dafny
+    def to_dafny_expr(node):
+        if isinstance(node, exp.Column):
+            col_lower = node.name.lower()
+            if col_lower not in schema_resolved:
+                raise UnsupportedContractError(f"Identifier '{node.name}' not found in schema.")
+            real_col, col_type = schema_resolved[col_lower]
+            if col_type != 'int':
+                raise UnsupportedContractError(f"Column '{real_col}' in expression must be of type 'int'.")
+            return f"row.{real_col}"
+        elif isinstance(node, exp.Literal):
+            if node.is_number and node.this.isdigit():
+                return str(node.this)
+            raise UnsupportedContractError(f"Only integer literals supported in expressions.")
+        elif isinstance(node, exp.Paren):
+            return f"({to_dafny_expr(node.this)})"
+        elif isinstance(node, exp.Mul):
+            return f"{to_dafny_expr(node.left)} * {to_dafny_expr(node.right)}"
+        elif isinstance(node, exp.Div):
+            return f"{to_dafny_expr(node.left)} / {to_dafny_expr(node.right)}"
+        elif isinstance(node, exp.Add):
+            return f"{to_dafny_expr(node.left)} + {to_dafny_expr(node.right)}"
+        elif isinstance(node, exp.Sub):
+            return f"{to_dafny_expr(node.left)} - {to_dafny_expr(node.right)}"
+        elif isinstance(node, exp.Star):
+            return "*"
+        else:
+            raise UnsupportedContractError(f"Unsupported expression construct: {type(node)}")
+
+    # Parse and validate aggregation node
+    if isinstance(agg_node, exp.Count):
+        query.agg_type = "COUNT"
+        if isinstance(agg_node.this, exp.Star):
+            query.agg_column = "*"
+            query.agg_expr_dafny = "1"
+        else:
+            if not isinstance(agg_node.this, exp.Column):
+                raise UnsupportedContractError("COUNT argument must be * or a column.")
+            col_lower = agg_node.this.name.lower()
+            if col_lower not in schema_resolved:
+                raise UnsupportedContractError(f"Aggregate column '{agg_node.this.name}' not found in schema.")
+            real_col, _ = schema_resolved[col_lower]
+            query.agg_column = real_col
+            query.agg_expr_dafny = "1"
+    else:
+        query.agg_type = "SUM" if isinstance(agg_node, exp.Sum) else "AVG"
+        query.agg_expr_dafny = to_dafny_expr(agg_node.this)
+        # Preserve original sql string for functional test runner compatibility
+        query.agg_column = agg_node.this.sql()
+
+    # 5. Parse WHERE clause
+    where_clause = expression.args.get("where")
+    if where_clause:
+        # Walk and forbid any Or or Not nodes
+        for w_node in where_clause.walk():
+            if isinstance(w_node, (exp.Or, exp.Not)):
                 raise UnsupportedContractError("Query falls outside the supported dashboard subset.")
-            
-            col = cond_match.group(1).strip()
-            op = cond_match.group(2).strip()
-            if op == '<>':
-                op = '!='
-            val_expr = cond_match.group(3).strip()
-            
-            if col not in schema_dict:
-                raise UnsupportedContractError(f"Filter column '{col}' not found in schema.")
-                
-            col_type = schema_dict[col]
-            
-            # Resolve value expression
-            # Check for literal placeholder
-            lit_match = re.match(r'^__LIT_(\d+)__$', val_expr)
-            if lit_match:
-                lit_idx = int(lit_match.group(1))
-                raw_lit = literals[lit_idx]
-                # Strip quotes
-                lit_val = raw_lit[1:-1]
-                # In SQL, an escaped quote '' is replaced by '
-                if raw_lit.startswith("'"):
-                    lit_val = lit_val.replace("''", "'")
-                else:
-                    lit_val = lit_val.replace('""', '"')
-                val_resolved = lit_val
-                val_type = 'string'
-            else:
-                # Try parsing as int
-                try:
-                    val_resolved = int(val_expr)
+
+        # Helper to flatten Ands
+        def flatten_and(node):
+            if isinstance(node, exp.And):
+                return flatten_and(node.left) + flatten_and(node.right)
+            return [node]
+
+        conditions = flatten_and(where_clause.this)
+        
+        op_map = {
+            exp.EQ: '=',
+            exp.NEQ: '!=',
+            exp.GT: '>',
+            exp.LT: '<',
+            exp.GTE: '>=',
+            exp.LTE: '<='
+        }
+
+        for cond in conditions:
+            # Must be a valid comparison
+            op_type = type(cond)
+            op = op_map.get(op_type)
+            if not op:
+                raise UnsupportedContractError("Query falls outside the supported dashboard subset.")
+
+            # Left side must be a Column
+            if not isinstance(cond.left, exp.Column):
+                raise UnsupportedContractError("Left hand side of comparison must be a column.")
+            col_lower = cond.left.name.lower()
+            if col_lower not in schema_resolved:
+                raise UnsupportedContractError(f"Filter column '{cond.left.name}' not found in schema.")
+            real_col, col_type = schema_resolved[col_lower]
+
+            # Right side can be Literal or Column
+            right_node = cond.right
+            if isinstance(right_node, exp.Literal):
+                if right_node.is_string:
+                    val_resolved = right_node.this
+                    val_type = 'string'
+                elif right_node.is_number and right_node.this.isdigit():
+                    val_resolved = int(right_node.this)
                     val_type = 'int'
-                except ValueError:
-                    # Check if it's a column in schema
-                    if val_expr in schema_dict:
-                        val_resolved = val_expr
-                        val_type = 'column'
-                    else:
-                        raise UnsupportedContractError("Query falls outside the supported dashboard subset.")
-                        
-            # Type check operator and operands
+                else:
+                    raise UnsupportedContractError("Query falls outside the supported dashboard subset.")
+            elif isinstance(right_node, exp.Column):
+                rcol_lower = right_node.name.lower()
+                if rcol_lower not in schema_resolved:
+                    raise UnsupportedContractError(f"Filter column '{right_node.name}' not found in schema.")
+                rreal_col, rcol_type = schema_resolved[rcol_lower]
+                val_resolved = rreal_col
+                val_type = 'column'
+            else:
+                raise UnsupportedContractError("Query falls outside the supported dashboard subset.")
+
+            # Type checking
             if col_type == 'int':
                 if val_type == 'column':
-                    if schema_dict[val_resolved] != 'int':
-                        raise UnsupportedContractError(f"Type mismatch: comparing int column '{col}' with non-int column '{val_resolved}'.")
+                    if schema_resolved[val_resolved.lower()][1] != 'int':
+                        raise UnsupportedContractError(f"Type mismatch: comparing int column '{real_col}' with non-int column '{val_resolved}'.")
                 elif val_type != 'int':
-                    raise UnsupportedContractError(f"Type mismatch: comparing int column '{col}' with non-int value.")
+                    raise UnsupportedContractError(f"Type mismatch: comparing int column '{real_col}' with non-int value.")
             elif col_type == 'string':
                 if val_type == 'column':
-                    if schema_dict[val_resolved] != 'string':
-                        raise UnsupportedContractError(f"Type mismatch: comparing string column '{col}' with non-string column '{val_resolved}'.")
+                    if schema_resolved[val_resolved.lower()][1] != 'string':
+                        raise UnsupportedContractError(f"Type mismatch: comparing string column '{real_col}' with non-string column '{val_resolved}'.")
                 elif val_type != 'string':
-                    raise UnsupportedContractError(f"Type mismatch: comparing string column '{col}' with non-string value.")
+                    raise UnsupportedContractError(f"Type mismatch: comparing string column '{real_col}' with non-string value.")
                 if op not in ('=', '!='):
                     raise UnsupportedContractError(f"Unsupported operator '{op}' for string type comparison.")
-            
-            query.where_conditions.append((col, op, val_resolved, val_type))
-            
+
+            query.where_conditions.append((real_col, op, val_resolved, val_type))
+
     return query
 
 def transpile_sql_to_dafny(sql_str: str, schema_dict: dict[str, str]) -> str:
