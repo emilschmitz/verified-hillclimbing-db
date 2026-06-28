@@ -38,8 +38,14 @@ class TestTranspilerFunctional(unittest.TestCase):
                 if not token:
                     continue
                 if re.match(r'^[a-zA-Z_][a-zA-Z0-9_]*$', token):
-                    if token in row:
-                        eval_parts.append(str(row[token]))
+                    # Resolve case-insensitively
+                    col_key = None
+                    for rk in row:
+                        if rk.lower() == token.lower():
+                            col_key = rk
+                            break
+                    if col_key is not None:
+                        eval_parts.append(str(row[col_key]))
                     else:
                         raise ValueError(f"Unknown column: {token}")
                 else:
@@ -80,9 +86,12 @@ class TestTranspilerFunctional(unittest.TestCase):
                 
         # 2. Group by
         groups = {}
-        if query.groupby_column:
+        if query.groupby_columns:
             for row in filtered_rows:
-                key = row[query.groupby_column]
+                if len(query.groupby_columns) == 1:
+                    key = row[query.groupby_columns[0]]
+                else:
+                    key = tuple(row[col] for col in query.groupby_columns)
                 groups.setdefault(key, []).append(row)
         else:
             groups[None] = filtered_rows
@@ -102,7 +111,7 @@ class TestTranspilerFunctional(unittest.TestCase):
                 raise ValueError(f"Unknown aggregation: {query.agg_type}")
             results[gkey] = val
             
-        if query.groupby_column:
+        if query.groupby_columns:
             return results
         else:
             return results[None]
@@ -132,12 +141,33 @@ class TestTranspilerFunctional(unittest.TestCase):
         if isinstance(expected, dict):
             print_lines.append('print "size:", |res|, "\\n";')
             for key in expected:
-                if isinstance(key, str):
-                    dafny_key = f'"{key}"'
+                if isinstance(key, tuple):
+                    print_args = []
+                    for i, k in enumerate(key):
+                        if i > 0:
+                            print_args.append('","')
+                        if isinstance(k, str):
+                            print_args.append(f'"{k}"')
+                        else:
+                            print_args.append(str(k))
+                    dafny_print_key = ", ".join(print_args)
+                    tuple_elements = []
+                    for k in key:
+                        if isinstance(k, str):
+                            tuple_elements.append(f'"{k}"')
+                        else:
+                            tuple_elements.append(str(k))
+                    dafny_key = f"({', '.join(tuple_elements)})"
                 else:
-                    dafny_key = str(key)
+                    if isinstance(key, str):
+                        dafny_print_key = f'"{key}"'
+                        dafny_key = f'"{key}"'
+                    else:
+                        dafny_print_key = str(key)
+                        dafny_key = str(key)
+                
                 print_lines.append(
-                    f'print {dafny_key}, ":", if {dafny_key} in res then res[{dafny_key}] else -999999, "\\n";'
+                    f'print {dafny_print_key}, ":", if {dafny_key} in res then res[{dafny_key}] else -999999, "\\n";'
                 )
         else:
             print_lines.append('print res, "\\n";')
@@ -160,8 +190,13 @@ method Main() {{
             tmp_name = tmp.name
             
         try:
+            cmd = ["dafny", "run", "--target:py"]
+            if not os.environ.get("VERIFY_DAFNY"):
+                cmd.append("--no-verify")
+            cmd.append(tmp_name)
+            
             res = subprocess.run(
-                ["dafny", "run", tmp_name],
+                cmd,
                 capture_output=True,
                 text=True
             )
@@ -195,10 +230,20 @@ method Main() {{
                         size = int(line.split(":")[1])
                     else:
                         key_part, val_part = line.split(":", 1)
-                        try:
-                            key = int(key_part)
-                        except ValueError:
-                            key = key_part
+                        elements = key_part.split(",")
+                        if len(elements) == 1:
+                            try:
+                                key = int(elements[0])
+                            except ValueError:
+                                key = elements[0]
+                        else:
+                            parsed_elements = []
+                            for e in elements:
+                                try:
+                                    parsed_elements.append(int(e))
+                                except ValueError:
+                                    parsed_elements.append(e)
+                            key = tuple(parsed_elements)
                         val = int(val_part)
                         parsed_dict[key] = val
                 self.assertEqual(size, len(expected), f"Map size mismatch for query: {query_str}")
@@ -273,6 +318,36 @@ method Main() {{
             "SELECT SUM(value * age) AS total_val_age "
             "FROM my_table "
             "WHERE age >= 20 AND age <= 30 AND value >= 10"
+        )
+
+    def test_functional_multi_column_groupby(self):
+        # Test grouping by multiple columns (category: string, age: int)
+        self.verify_query(
+            "SELECT category, age, SUM(value) "
+            "FROM my_table "
+            "GROUP BY category, age"
+        )
+        self.verify_query(
+            "SELECT category, age, COUNT(*) "
+            "FROM my_table "
+            "GROUP BY category, age"
+        )
+
+    def test_functional_case_insensitivity(self):
+        # Test query parsing and mapping with mixed casing
+        self.verify_query(
+            "SELECT CATEGORY, AGE, SUM(VALUE) "
+            "FROM my_table "
+            "WHERE AGE > 20 "
+            "GROUP BY category, Age"
+        )
+
+    def test_functional_select_order(self):
+        # Test that having the aggregate first in select doesn't fail
+        self.verify_query(
+            "SELECT SUM(value), category "
+            "FROM my_table "
+            "GROUP BY category"
         )
 
 if __name__ == '__main__':

@@ -126,5 +126,12 @@ class TestTranspilerUnit(unittest.TestCase):
         with self.assertRaises(UnsupportedContractError):
             transpile_sql_to_dafny("SELECT SUM(value @ age) FROM my_table", self.schema)
 
+    def test_multi_column_groupby(self):
+        sql = "SELECT category, age, SUM(value) FROM my_table GROUP BY category, age"
+        result = transpile_sql_to_dafny(sql, self.schema)
+        self.assertIn("function MethodSpec(data: seq<Row>): map<(string, int), int>", result)
+        self.assertIn("var key := (row.category, row.age);", result)
+        self.assertIn("tailMap[key := val + row.value]", result)
+
 if __name__ == '__main__':
     unittest.main()

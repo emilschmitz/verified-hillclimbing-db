@@ -53,9 +53,20 @@ class SQLQuery:
         self.table: str = ""
         self.agg_type: str = ""  # SUM, COUNT, AVG
         self.agg_column: str = ""  # Column name or "*"
-        self.groupby_column: str = None  # Group by column name, if any
+        self.groupby_columns: list[str] = []
         self.where_conditions: list[tuple[str, str, any, str]] = []  # list of (col, op, val, val_type)
         self.agg_expr_dafny: str = ""
+
+    @property
+    def groupby_column(self) -> str:
+        return self.groupby_columns[0] if self.groupby_columns else None
+
+    @groupby_column.setter
+    def groupby_column(self, val: str):
+        if val:
+            self.groupby_columns = [val]
+        else:
+            self.groupby_columns = []
 
 def parse_sql(sql_str: str, schema_dict: dict[str, str]) -> SQLQuery:
     """Parses a SQL statement within the supported dashboard contract boundary using sqlglot."""
@@ -94,15 +105,13 @@ def parse_sql(sql_str: str, schema_dict: dict[str, str]) -> SQLQuery:
     groupby_clause = expression.args.get("group")
     if groupby_clause:
         groupby_exprs = groupby_clause.expressions
-        if len(groupby_exprs) != 1:
-            raise UnsupportedContractError("Query falls outside the supported dashboard subset.")
-        groupby_node = groupby_exprs[0]
-        if not isinstance(groupby_node, exp.Column):
-            raise UnsupportedContractError("Query falls outside the supported dashboard subset.")
-        groupby_col_lower = groupby_node.name.lower()
-        if groupby_col_lower not in schema_resolved:
-            raise UnsupportedContractError(f"Group by column '{groupby_node.name}' not found in schema.")
-        query.groupby_column = schema_resolved[groupby_col_lower][0]
+        for groupby_node in groupby_exprs:
+            if not isinstance(groupby_node, exp.Column):
+                raise UnsupportedContractError("Query falls outside the supported dashboard subset.")
+            groupby_col_lower = groupby_node.name.lower()
+            if groupby_col_lower not in schema_resolved:
+                raise UnsupportedContractError(f"Group by column '{groupby_node.name}' not found in schema.")
+            query.groupby_columns.append(schema_resolved[groupby_col_lower][0])
 
     # Helper to strip alias
     def unwrap_alias(node):
@@ -112,20 +121,25 @@ def parse_sql(sql_str: str, schema_dict: dict[str, str]) -> SQLQuery:
 
     # 4. SELECT items validation
     select_items = expression.expressions
-    if query.groupby_column:
-        if len(select_items) != 2:
+    if query.groupby_columns:
+        # Number of select items must equal number of groupby columns + 1 (for the aggregate)
+        if len(select_items) != len(query.groupby_columns) + 1:
             raise UnsupportedContractError("Query falls outside the supported dashboard subset.")
         unwrapped = [unwrap_alias(item) for item in select_items]
         
-        col_node = None
+        # Verify that all groupby columns are present, and exactly one aggregate is present
+        select_cols = set()
         agg_node = None
         for item in unwrapped:
-            if isinstance(item, exp.Column) and item.name.lower() == query.groupby_column.lower():
-                col_node = item
+            if isinstance(item, exp.Column):
+                col_lower = item.name.lower()
+                if col_lower in schema_resolved:
+                    select_cols.add(schema_resolved[col_lower][0])
             elif isinstance(item, (exp.Sum, exp.Count, exp.Avg)):
                 agg_node = item
-        if not col_node or not agg_node:
-            raise UnsupportedContractError("Query select clause must include the group by column.")
+        
+        if not agg_node or select_cols != set(query.groupby_columns):
+            raise UnsupportedContractError("Query select clause must include all group by columns and the aggregate.")
     else:
         if len(select_items) != 1:
             raise UnsupportedContractError("Query falls outside the supported dashboard subset.")
@@ -280,7 +294,18 @@ def transpile_sql_to_dafny(sql_str: str, schema_dict: dict[str, str]) -> str:
     schema_dafny = f"datatype Row = Row({fields_str})"
 
     # 4. Determine key variables
-    groupby_col = query.groupby_column
+    if query.groupby_columns:
+        types = [schema_dict[col] for col in query.groupby_columns]
+        if len(query.groupby_columns) == 1:
+            key_type = types[0]
+            ret_type = f"map<{key_type}, int>"
+            key_expr = f"row.{query.groupby_columns[0]}"
+        else:
+            ret_type = f"map<({', '.join(types)}), int>"
+            key_expr = f"({', '.join(f'row.{col}' for col in query.groupby_columns)})"
+    else:
+        ret_type = "int"
+        key_expr = None
     
     # Construct WHERE clause condition for row
     if query.where_conditions:
@@ -305,7 +330,7 @@ def transpile_sql_to_dafny(sql_str: str, schema_dict: dict[str, str]) -> str:
         then_val = "map[]" if "map" in return_type else "0"
         
         # Else case
-        if groupby_col:
+        if query.groupby_columns:
             # GROUP BY recursive logic
             term_expr = query.agg_expr_dafny if is_sum else "1"
             if where_expr:
@@ -313,7 +338,7 @@ def transpile_sql_to_dafny(sql_str: str, schema_dict: dict[str, str]) -> str:
                     f"var tailMap := {func_name}(data[1..]);\n"
                     f"var row := data[0];\n"
                     f"if {where_expr} then\n"
-                    f"  var key := row.{groupby_col};\n"
+                    f"  var key := {key_expr};\n"
                     f"  var val := if key in tailMap then tailMap[key] else 0;\n"
                     f"  tailMap[key := val + {term_expr}]\n"
                     f"else\n"
@@ -323,7 +348,7 @@ def transpile_sql_to_dafny(sql_str: str, schema_dict: dict[str, str]) -> str:
                 else_body = (
                     f"var tailMap := {func_name}(data[1..]);\n"
                     f"var row := data[0];\n"
-                    f"var key := row.{groupby_col};\n"
+                    f"var key := {key_expr};\n"
                     f"var val := if key in tailMap then tailMap[key] else 0;\n"
                     f"tailMap[key := val + {term_expr}]"
                 )
@@ -350,10 +375,7 @@ def transpile_sql_to_dafny(sql_str: str, schema_dict: dict[str, str]) -> str:
     functions = []
     
     if query.agg_type == 'AVG':
-        if groupby_col:
-            key_type = schema_dict[groupby_col]
-            ret_type = f"map<{key_type}, int>"
-            
+        if query.groupby_columns:
             # Generate SumMapHelper
             sum_body = make_recursive_body("SumMapHelper", is_sum=True, return_type=ret_type)
             sum_func = DafnyFunction("SumMapHelper", [("data", "seq<Row>")], ret_type, sum_body)
@@ -394,12 +416,6 @@ def transpile_sql_to_dafny(sql_str: str, schema_dict: dict[str, str]) -> str:
     else:
         # SUM or COUNT
         is_sum = (query.agg_type == 'SUM')
-        if groupby_col:
-            key_type = schema_dict[groupby_col]
-            ret_type = f"map<{key_type}, int>"
-        else:
-            ret_type = "int"
-            
         spec_body = make_recursive_body("MethodSpec", is_sum=is_sum, return_type=ret_type)
         spec_func = DafnyFunction("MethodSpec", [("data", "seq<Row>")], ret_type, spec_body)
         functions.append(spec_func)
