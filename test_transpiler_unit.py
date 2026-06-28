@@ -59,7 +59,9 @@ class TestTranspilerUnit(unittest.TestCase):
     def test_where_multiple_conditions(self):
         sql = "SELECT SUM(value) FROM my_table WHERE category = 'A' AND age > 21 AND name != 'Bob'"
         result = transpile_sql_to_dafny(sql, self.schema)
-        self.assertIn('row.category == "A" && row.age > 21 && row.name != "Bob"', result)
+        self.assertIn('row.category == "A"', result)
+        self.assertIn('row.age > 21', result)
+        self.assertIn('row.name != "Bob"', result)
 
     def test_unsupported_queries(self):
         with self.assertRaises(UnsupportedContractError):
@@ -70,9 +72,6 @@ class TestTranspilerUnit(unittest.TestCase):
 
         with self.assertRaises(UnsupportedContractError):
             transpile_sql_to_dafny("SELECT MIN(value) FROM my_table", self.schema)
-
-        with self.assertRaises(UnsupportedContractError):
-            transpile_sql_to_dafny("SELECT SUM(value) FROM my_table WHERE category = 'A' OR age > 18", self.schema)
 
         with self.assertRaises(UnsupportedContractError):
             transpile_sql_to_dafny("SELECT SUM(non_existent) FROM my_table", self.schema)

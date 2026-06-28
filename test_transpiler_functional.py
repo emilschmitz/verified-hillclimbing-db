@@ -55,32 +55,14 @@ class TestTranspilerFunctional(unittest.TestCase):
         # 1. Filter rows
         filtered_rows = []
         for row in self.dummy_data:
-            keep = True
-            for col, op, val, val_type in query.where_conditions:
-                row_val = row[col]
-                if val_type == 'column':
-                    right_val = row[val]
-                else:
-                    right_val = val
-                
-                if op == '=':
-                    match = (row_val == right_val)
-                elif op == '!=':
-                    match = (row_val != right_val)
-                elif op == '>':
-                    match = (row_val > right_val)
-                elif op == '<':
-                    match = (row_val < right_val)
-                elif op == '>=':
-                    match = (row_val >= right_val)
-                elif op == '<=':
-                    match = (row_val <= right_val)
-                else:
-                    match = False
-                
-                if not match:
-                    keep = False
-                    break
+            if query.where_expr_dafny:
+                py_cond = query.where_expr_dafny.replace("!=", "__NEQ__")
+                py_cond = py_cond.replace("&&", "and").replace("||", "or").replace("!", "not")
+                py_cond = py_cond.replace("__NEQ__", "!=")
+                py_cond = re.sub(r'\brow\.([a-zA-Z_][a-zA-Z0-9_]*)\b', r'row["\1"]', py_cond)
+                keep = eval(py_cond, {"row": row})
+            else:
+                keep = True
             if keep:
                 filtered_rows.append(row)
                 

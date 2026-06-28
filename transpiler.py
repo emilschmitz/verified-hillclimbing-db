@@ -56,6 +56,7 @@ class SQLQuery:
         self.groupby_columns: list[str] = []
         self.where_conditions: list[tuple[str, str, any, str]] = []  # list of (col, op, val, val_type)
         self.agg_expr_dafny: str = ""
+        self.where_expr_dafny: str = ""
 
     @property
     def groupby_column(self) -> str:
@@ -210,88 +211,118 @@ def parse_sql(sql_str: str, schema_dict: dict[str, str]) -> SQLQuery:
     # 5. Parse WHERE clause
     where_clause = expression.args.get("where")
     if where_clause:
-        # Walk and forbid any Or or Not nodes
-        for w_node in where_clause.walk():
-            if isinstance(w_node, (exp.Or, exp.Not)):
-                raise UnsupportedContractError("Query falls outside the supported dashboard subset.")
-
-        # Helper to flatten Ands
-        def flatten_and(node):
+        def compile_where_expr(node):
             if isinstance(node, exp.And):
-                return flatten_and(node.left) + flatten_and(node.right)
-            return [node]
-
-        conditions = flatten_and(where_clause.this)
-        
-        op_map = {
-            exp.EQ: '=',
-            exp.NEQ: '!=',
-            exp.GT: '>',
-            exp.LT: '<',
-            exp.GTE: '>=',
-            exp.LTE: '<='
-        }
-
-        for cond in conditions:
-            # Must be a valid comparison
-            op_type = type(cond)
-            op = op_map.get(op_type)
-            if not op:
-                raise UnsupportedContractError("Query falls outside the supported dashboard subset.")
-
-            # Left side must be a Column
-            if not isinstance(cond.left, exp.Column):
-                raise UnsupportedContractError("Left hand side of comparison must be a column.")
-            col_lower = cond.left.name.lower()
-            if col_lower not in schema_resolved:
-                raise UnsupportedContractError(f"Filter column '{cond.left.name}' not found in schema.")
-            real_col, col_type = schema_resolved[col_lower]
-
-            # Right side can be Literal, Neg(Literal), or Column
-            right_node = cond.right
-            if isinstance(right_node, exp.Literal):
-                if right_node.is_string:
-                    val_resolved = right_node.this
-                    val_type = 'string'
-                elif right_node.is_number and right_node.this.isdigit():
-                    val_resolved = int(right_node.this)
-                    val_type = 'int'
+                return f"({compile_where_expr(node.left)} && {compile_where_expr(node.right)})"
+            elif isinstance(node, exp.Or):
+                return f"({compile_where_expr(node.left)} || {compile_where_expr(node.right)})"
+            elif isinstance(node, exp.Not):
+                return f"!({compile_where_expr(node.this)})"
+            elif isinstance(node, exp.Between):
+                low_val = compile_where_expr(node.args.get("low"))
+                high_val = compile_where_expr(node.args.get("high"))
+                this_val = compile_where_expr(node.this)
+                return f"({this_val} >= {low_val} && {this_val} <= {high_val})"
+            elif isinstance(node, exp.In):
+                this_val = compile_where_expr(node.this)
+                eqs = []
+                for val_node in node.expressions:
+                    val_str = compile_where_expr(val_node)
+                    eqs.append(f"{this_val} == {val_str}")
+                return f"({' || '.join(eqs)})"
+            elif isinstance(node, (exp.EQ, exp.NEQ, exp.GT, exp.LT, exp.GTE, exp.LTE)):
+                op_map = {
+                    exp.EQ: '==',
+                    exp.NEQ: '!=',
+                    exp.GT: '>',
+                    exp.LT: '<',
+                    exp.GTE: '>=',
+                    exp.LTE: '<='
+                }
+                op = op_map[type(node)]
+                
+                # Check left side column
+                if not isinstance(node.left, exp.Column):
+                    raise UnsupportedContractError("Left hand side of comparison must be a column.")
+                col_lower = node.left.name.lower()
+                if col_lower not in schema_resolved:
+                    raise UnsupportedContractError(f"Filter column '{node.left.name}' not found in schema.")
+                real_col, col_type = schema_resolved[col_lower]
+                
+                # Check right side
+                right_node = node.right
+                if isinstance(right_node, exp.Literal):
+                    if right_node.is_string:
+                        val_resolved = f'"{right_node.this}"'
+                        val_type = 'string'
+                    elif right_node.is_number and right_node.this.isdigit():
+                        val_resolved = str(right_node.this)
+                        val_type = 'int'
+                    else:
+                        raise UnsupportedContractError("Query falls outside the supported dashboard subset.")
+                elif isinstance(right_node, exp.Neg) and isinstance(right_node.this, exp.Literal):
+                    neg_lit = right_node.this
+                    if neg_lit.is_number and neg_lit.this.isdigit():
+                        val_resolved = f"-{neg_lit.this}"
+                        val_type = 'int'
+                    else:
+                        raise UnsupportedContractError("Query falls outside the supported dashboard subset.")
+                elif isinstance(right_node, exp.Column):
+                    rcol_lower = right_node.name.lower()
+                    if rcol_lower not in schema_resolved:
+                        raise UnsupportedContractError(f"Filter column '{right_node.name}' not found in schema.")
+                    rreal_col, rcol_type = schema_resolved[rcol_lower]
+                    val_resolved = f"row.{rreal_col}"
+                    val_type = rcol_type
                 else:
                     raise UnsupportedContractError("Query falls outside the supported dashboard subset.")
-            elif isinstance(right_node, exp.Neg) and isinstance(right_node.this, exp.Literal):
-                neg_lit = right_node.this
-                if neg_lit.is_number and neg_lit.this.isdigit():
-                    val_resolved = -int(neg_lit.this)
-                    val_type = 'int'
+                
+                # Type checking comparison
+                if col_type == 'int':
+                    if val_type != 'int':
+                        raise UnsupportedContractError(f"Type mismatch: comparing int column '{real_col}' with non-int value.")
+                elif col_type == 'string':
+                    if val_type != 'string':
+                        raise UnsupportedContractError(f"Type mismatch: comparing string column '{real_col}' with non-string value.")
+                    if op not in ('==', '!='):
+                        raise UnsupportedContractError(f"Unsupported operator '{op}' for string type comparison.")
+                
+                # Append to where_conditions list for compatibility
+                op_sql = '=' if op == '==' else op
+                if isinstance(right_node, exp.Literal):
+                    val_raw = right_node.this
+                    val_t = 'string' if right_node.is_string else 'int'
+                elif isinstance(right_node, exp.Neg) and isinstance(right_node.this, exp.Literal):
+                    val_raw = -int(right_node.this.this)
+                    val_t = 'int'
                 else:
-                    raise UnsupportedContractError("Query falls outside the supported dashboard subset.")
-            elif isinstance(right_node, exp.Column):
-                rcol_lower = right_node.name.lower()
-                if rcol_lower not in schema_resolved:
-                    raise UnsupportedContractError(f"Filter column '{right_node.name}' not found in schema.")
-                rreal_col, rcol_type = schema_resolved[rcol_lower]
-                val_resolved = rreal_col
-                val_type = 'column'
+                    val_raw = right_node.name
+                    val_t = 'column'
+                query.where_conditions.append((real_col, op_sql, val_raw, val_t))
+                
+                return f"row.{real_col} {op} {val_resolved}"
+            elif isinstance(node, exp.Literal):
+                if node.is_string:
+                    return f'"{node.this}"'
+                elif node.is_number and node.this.isdigit():
+                    return str(node.this)
+                raise UnsupportedContractError("Unsupported literal type.")
+            elif isinstance(node, exp.Neg) and isinstance(node.this, exp.Literal):
+                if node.this.is_number and node.this.isdigit():
+                    return f"-{node.this}"
+                raise UnsupportedContractError("Unsupported negative literal.")
+            elif isinstance(node, exp.Column):
+                col_lower = node.name.lower()
+                if col_lower not in schema_resolved:
+                    raise UnsupportedContractError(f"Identifier '{node.name}' not found in schema.")
+                real_col, col_type = schema_resolved[col_lower]
+                return f"row.{real_col}"
+            elif isinstance(node, exp.Paren):
+                return f"({compile_where_expr(node.this)})"
             else:
-                raise UnsupportedContractError("Query falls outside the supported dashboard subset.")
+                raise UnsupportedContractError(f"Unsupported node in filter expression: {type(node)}")
 
-            # Type checking
-            if col_type == 'int':
-                if val_type == 'column':
-                    if schema_resolved[val_resolved.lower()][1] != 'int':
-                        raise UnsupportedContractError(f"Type mismatch: comparing int column '{real_col}' with non-int column '{val_resolved}'.")
-                elif val_type != 'int':
-                    raise UnsupportedContractError(f"Type mismatch: comparing int column '{real_col}' with non-int value.")
-            elif col_type == 'string':
-                if val_type == 'column':
-                    if schema_resolved[val_resolved.lower()][1] != 'string':
-                        raise UnsupportedContractError(f"Type mismatch: comparing string column '{real_col}' with non-string column '{val_resolved}'.")
-                elif val_type != 'string':
-                    raise UnsupportedContractError(f"Type mismatch: comparing string column '{real_col}' with non-string value.")
-                if op not in ('=', '!='):
-                    raise UnsupportedContractError(f"Unsupported operator '{op}' for string type comparison.")
-
-            query.where_conditions.append((real_col, op, val_resolved, val_type))
+        query.where_expr_dafny = compile_where_expr(where_clause.this)
 
     return query
 
@@ -325,20 +356,7 @@ def transpile_sql_to_dafny(sql_str: str, schema_dict: dict[str, str]) -> str:
         key_expr = None
     
     # Construct WHERE clause condition for row
-    if query.where_conditions:
-        cond_parts = []
-        for col, op, val, val_type in query.where_conditions:
-            dafny_op = "==" if op == "=" else op
-            if val_type == 'column':
-                right = f"row.{val}"
-            elif val_type == 'string':
-                right = f'"{val}"'
-            else:
-                right = str(val)
-            cond_parts.append(f"row.{col} {dafny_op} {right}")
-        where_expr = " && ".join(cond_parts)
-    else:
-        where_expr = None
+    where_expr = query.where_expr_dafny if query.where_expr_dafny else None
 
     # Helper function to generate a SUM or COUNT recursive body
     def make_recursive_body(func_name: str, is_sum: bool, return_type: str):
