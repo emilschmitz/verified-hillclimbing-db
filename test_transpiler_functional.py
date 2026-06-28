@@ -350,5 +350,10 @@ method Main() {{
             "GROUP BY category"
         )
 
+    def test_functional_negative_literals(self):
+        self.verify_query("SELECT SUM(value * -2) FROM my_table")
+        self.verify_query("SELECT SUM(value) FROM my_table WHERE age > -10")
+        self.verify_query("SELECT SUM(value * -1) FROM my_table WHERE age >= -5 AND age <= 100")
+
 if __name__ == '__main__':
     unittest.main()

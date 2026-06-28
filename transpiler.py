@@ -111,7 +111,10 @@ def parse_sql(sql_str: str, schema_dict: dict[str, str]) -> SQLQuery:
             groupby_col_lower = groupby_node.name.lower()
             if groupby_col_lower not in schema_resolved:
                 raise UnsupportedContractError(f"Group by column '{groupby_node.name}' not found in schema.")
-            query.groupby_columns.append(schema_resolved[groupby_col_lower][0])
+            groupby_col_canonical = schema_resolved[groupby_col_lower][0]
+            if groupby_col_canonical in query.groupby_columns:
+                raise UnsupportedContractError("Duplicate group-by columns are not supported.")
+            query.groupby_columns.append(groupby_col_canonical)
 
     # Helper to strip alias
     def unwrap_alias(node):
@@ -161,11 +164,18 @@ def parse_sql(sql_str: str, schema_dict: dict[str, str]) -> SQLQuery:
             if node.is_number and node.this.isdigit():
                 return str(node.this)
             raise UnsupportedContractError(f"Only integer literals supported in expressions.")
+        elif isinstance(node, exp.Neg):
+            return f"-{to_dafny_expr(node.this)}"
         elif isinstance(node, exp.Paren):
             return f"({to_dafny_expr(node.this)})"
         elif isinstance(node, exp.Mul):
             return f"{to_dafny_expr(node.left)} * {to_dafny_expr(node.right)}"
         elif isinstance(node, exp.Div):
+            # Check for division by zero literal
+            if isinstance(node.right, exp.Literal) and node.right.this == "0":
+                raise UnsupportedContractError("Division by zero literal is not supported.")
+            if isinstance(node.right, exp.Neg) and isinstance(node.right.this, exp.Literal) and node.right.this.this == "0":
+                raise UnsupportedContractError("Division by zero literal is not supported.")
             return f"{to_dafny_expr(node.left)} / {to_dafny_expr(node.right)}"
         elif isinstance(node, exp.Add):
             return f"{to_dafny_expr(node.left)} + {to_dafny_expr(node.right)}"
@@ -237,7 +247,7 @@ def parse_sql(sql_str: str, schema_dict: dict[str, str]) -> SQLQuery:
                 raise UnsupportedContractError(f"Filter column '{cond.left.name}' not found in schema.")
             real_col, col_type = schema_resolved[col_lower]
 
-            # Right side can be Literal or Column
+            # Right side can be Literal, Neg(Literal), or Column
             right_node = cond.right
             if isinstance(right_node, exp.Literal):
                 if right_node.is_string:
@@ -245,6 +255,13 @@ def parse_sql(sql_str: str, schema_dict: dict[str, str]) -> SQLQuery:
                     val_type = 'string'
                 elif right_node.is_number and right_node.this.isdigit():
                     val_resolved = int(right_node.this)
+                    val_type = 'int'
+                else:
+                    raise UnsupportedContractError("Query falls outside the supported dashboard subset.")
+            elif isinstance(right_node, exp.Neg) and isinstance(right_node.this, exp.Literal):
+                neg_lit = right_node.this
+                if neg_lit.is_number and neg_lit.this.isdigit():
+                    val_resolved = -int(neg_lit.this)
                     val_type = 'int'
                 else:
                     raise UnsupportedContractError("Query falls outside the supported dashboard subset.")

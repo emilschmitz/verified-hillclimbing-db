@@ -133,5 +133,21 @@ class TestTranspilerUnit(unittest.TestCase):
         self.assertIn("var key := (row.category, row.age);", result)
         self.assertIn("tailMap[key := val + row.value]", result)
 
+    def test_division_by_zero_fails(self):
+        with self.assertRaises(UnsupportedContractError):
+            transpile_sql_to_dafny("SELECT SUM(value / 0) FROM my_table", self.schema)
+        with self.assertRaises(UnsupportedContractError):
+            transpile_sql_to_dafny("SELECT SUM(value / -0) FROM my_table", self.schema)
+
+    def test_duplicate_groupby_fails(self):
+        with self.assertRaises(UnsupportedContractError):
+            transpile_sql_to_dafny("SELECT category, SUM(value) FROM my_table GROUP BY category, Category", self.schema)
+
+    def test_negative_literals(self):
+        sql = "SELECT SUM(value * -2) FROM my_table WHERE age > -5"
+        result = transpile_sql_to_dafny(sql, self.schema)
+        self.assertIn("row.value * -2", result)
+        self.assertIn("row.age > -5", result)
+
 if __name__ == '__main__':
     unittest.main()
