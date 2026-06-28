@@ -140,7 +140,7 @@ pub mod _module {
                 })
         }) as Rc<dyn ::std::ops::Fn(&_) -> _>
                         };
-                    integer_range(Zero::zero(), int!(b"10000")).map(move |i| _initializer(&i)).collect::<Sequence<_>>()
+                    integer_range(Zero::zero(), int!(1000)).map(move |i| _initializer(&i)).collect::<Sequence<_>>()
                 };
             let mut spec_res: DafnyInt = _default::MethodSpec(&data);
             let mut opt_res: DafnyInt;

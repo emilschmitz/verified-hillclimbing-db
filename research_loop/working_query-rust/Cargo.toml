@@ -1,0 +1,12 @@
+[package]
+name = "working_query"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+dafny_runtime = { path = "runtime" }
+
+[[bin]]
+name = "working_query"
+path = "src/working_query.rs"
+
