@@ -45,6 +45,73 @@ def get_dafny_type(col: str, col_type: str) -> str:
         return 'bv32'
     return col_type
 
+def optimize_rust_file(file_path):
+    if not os.path.exists(file_path):
+        return
+    with open(file_path, "r") as f:
+        content = f.read()
+    
+    # 1. Locate RunQuery function block
+    pattern = r"(pub fn RunQuery\([^{]*\{)([\s\S]*?)(\n\s*\}\n)"
+    match = re.search(pattern, content)
+    if not match:
+        return
+    
+    header, body, footer = match.groups()
+    
+    # Replace return type to u64
+    header = header.replace("-> DafnyInt", "-> u64")
+    
+    # Optimize local loop variables to primitive integers
+    body = body.replace("let mut res: DafnyInt = int!(0);", "let mut res: u64 = 0;")
+    body = body.replace("let mut res: DafnyInt = int!(0_i32);", "let mut res: u64 = 0;")
+    body = body.replace("let mut i: DafnyInt = int!(0);", "let mut i: usize = 0;")
+    body = body.replace("let mut i: DafnyInt = int!(0_i32);", "let mut i: usize = 0;")
+    body = body.replace("let mut len: DafnyInt = data.cardinality();", "let mut len: usize = data.cardinality().as_usize();")
+    body = body.replace("let mut len: DafnyInt = LO_ORDERDATE.cardinality();", "let mut len: usize = LO_ORDERDATE.cardinality().as_usize();")
+    
+    # Replace loop iterator conditions and increments
+    body = body.replace("while i.clone() < len.clone() {", "while i < len {")
+    body = body.replace("i = i.clone() + int!(1);", "i = i + 1;")
+    body = body.replace("i = i.clone() + int!(1_i32);", "i = i + 1;")
+    
+    # Replace index accesses to use get_usize instead of get(&DafnyInt)
+    body = body.replace("data.get(&i)", "data.get_usize(i)")
+    body = body.replace("LO_ORDERDATE.get(&i)", "LO_ORDERDATE.get_usize(i)")
+    body = body.replace("LO_DISCOUNT.get(&i)", "LO_DISCOUNT.get_usize(i)")
+    body = body.replace("LO_QUANTITY.get(&i)", "LO_QUANTITY.get_usize(i)")
+    body = body.replace("LO_EXTENDEDPRICE.get(&i)", "LO_EXTENDEDPRICE.get_usize(i)")
+    
+    # Replace standard cloned math operations to native primitive u64 arithmetic
+    body = body.replace("res = res.clone() +", "res = res +")
+    body = body.replace("return res.clone();", "return res;")
+    
+    # Replace integer literal wrappers int!(N)
+    body = re.sub(r"int!\((\d+)(?:_i32)?\)", r"\1", body)
+    
+    # Replace complex int!(row.FIELD().clone()) wrappers to (row.FIELD().clone() as u64)
+    body = re.sub(r"int!\((row\.[a-zA-Z0-9_]+\(\)(?:\.clone\(\))?)\)", r"(\1 as u64)", body)
+    
+    # Reassemble
+    optimized_content = content[:match.start()] + header + body + footer + content[match.end():]
+    
+    # 2. Update Main's variable declarations for _out0 and opt_res to u64
+    optimized_content = optimized_content.replace(
+        "let mut _out0: DafnyInt = _default::RunQuery(&data);",
+        "let mut _out0: u64 = _default::RunQuery(&data);"
+    )
+    optimized_content = optimized_content.replace(
+        "let mut _out0: DafnyInt = _default::RunQuery(&LO_ORDERDATE",
+        "let mut _out0: u64 = _default::RunQuery(&LO_ORDERDATE"
+    )
+    optimized_content = optimized_content.replace(
+        "let mut opt_res: DafnyInt;",
+        "let mut opt_res: u64;"
+    )
+    
+    with open(file_path, "w") as f:
+        f.write(optimized_content)
+
 def generate_row_expr(i_val_str="i"):
     """
     Generates a Dafny Row constructor expression dynamically based on the schema,
@@ -257,6 +324,12 @@ method {{:verify false}} Main() {{
         exit_with_metrics("FAILURE", True, -1, f"Failed to sync generated Rust source into stable workspace: {e}")
 
     shutil.rmtree(temp_build_dir, ignore_errors=True)
+
+    # 6c. Apply custom u64 Native Approximation Compiler Pass
+    try:
+        optimize_rust_file(os.path.join(stable_rust_dir, "src", "working_query.rs"))
+    except Exception as e:
+        exit_with_metrics("FAILURE", True, -1, f"Custom u64 Rust optimization pass failed: {e}")
 
     # 7. Native Compilation using Cargo (Release Mode)
     cargo_toml_path = os.path.join(stable_rust_dir, "Cargo.toml")
