@@ -162,6 +162,7 @@ def generate_plots(query_id, history_path, duckdb_latency, output_dir):
         lat = h.get("rust_latency_us", -1)
         exec_ms.append(lat / 1000.0 if lat > 0 else 0)
         
+    transpile_ms = [max(0, h.get("transpile_time_ms", 0)) for h in history]
     verify_ms = [max(0, h.get("verification_time_ms", 0)) for h in history]
     compile_ms = [max(0, h.get("compilation_time_ms", 0)) for h in history]
     agent_ms = [max(0, h.get("agent_time_ms", 0)) for h in history]
@@ -169,15 +170,17 @@ def generate_plots(query_id, history_path, duckdb_latency, output_dir):
     fig, ax = plt.subplots(figsize=(10, 5))
     
     import numpy as np
+    bars_transpile = np.array(transpile_ms)
     bars_agent = np.array(agent_ms)
     bars_verify = np.array(verify_ms)
     bars_compile = np.array(compile_ms)
     bars_exec = np.array(exec_ms)
     
-    ax.bar(iterations, bars_agent, label="Agent Coding / Search")
-    ax.bar(iterations, bars_verify, bottom=bars_agent, label="Dafny verification")
-    ax.bar(iterations, bars_compile, bottom=bars_agent + bars_verify, label="Rust/Cargo compile")
-    ax.bar(iterations, bars_exec, bottom=bars_agent + bars_verify + bars_compile, label="Rust execute")
+    ax.bar(iterations, bars_transpile, label="SQL Transpile")
+    ax.bar(iterations, bars_agent, bottom=bars_transpile, label="Agent Coding / Search")
+    ax.bar(iterations, bars_verify, bottom=bars_transpile + bars_agent, label="Dafny verification")
+    ax.bar(iterations, bars_compile, bottom=bars_transpile + bars_agent + bars_verify, label="Rust/Cargo compile")
+    ax.bar(iterations, bars_exec, bottom=bars_transpile + bars_agent + bars_verify + bars_compile, label="Rust execute")
     
     ax.set_xlabel("Iterations")
     ax.set_ylabel("Time (ms)")
@@ -326,6 +329,7 @@ Optimization guidelines:
                 "proof_verified": False,
                 "latency_us": -1,
                 "compiler_error": f"Harness crashed: {harness_res.stderr}",
+                "transpile_time_ms": -1,
                 "verification_time_ms": -1,
                 "compilation_time_ms": -1
             }
@@ -345,6 +349,7 @@ Optimization guidelines:
             "proof_verified": metrics["proof_verified"],
             "rust_latency_us": metrics["latency_us"],
             "compiler_error": metrics["compiler_error"],
+            "transpile_time_ms": metrics.get("transpile_time_ms", -1),
             "verification_time_ms": metrics.get("verification_time_ms", -1),
             "compilation_time_ms": metrics.get("compilation_time_ms", -1),
             "agent_time_ms": agent_time_ms,

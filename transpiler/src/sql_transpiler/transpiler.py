@@ -160,7 +160,7 @@ def parse_sql(sql_str: str, schema_dict: dict[str, str]) -> SQLQuery:
             real_col, col_type = schema_resolved[col_lower]
             if col_type != 'int':
                 raise UnsupportedContractError(f"Column '{real_col}' in expression must be of type 'int'.")
-            return f"row.{real_col}"
+            return f"(row.{real_col} as int)"
         elif isinstance(node, exp.Literal):
             if node.is_number and node.this.isdigit():
                 return str(node.this)
@@ -356,6 +356,13 @@ def parse_sql(sql_str: str, schema_dict: dict[str, str]) -> SQLQuery:
 
     return query
 
+def get_dafny_type(col: str, col_type: str) -> str:
+    if col_type == 'int':
+        if col.upper() in ('LO_EXTENDEDPRICE', 'LO_ORDTOTALPRICE', 'LO_REVENUE', 'LO_SUPPLYCOST'):
+            return 'bv64'
+        return 'bv32'
+    return col_type
+
 def transpile_sql_to_dafny(sql_str: str, schema_dict: dict[str, str]) -> str:
     """Translates SQL query to mathematical Dafny specification."""
     # 1. Parse and validate schema
@@ -367,13 +374,13 @@ def transpile_sql_to_dafny(sql_str: str, schema_dict: dict[str, str]) -> str:
     query = parse_sql(sql_str, schema_dict)
 
     # 3. Generate schema datatype representation
-    fields = [f"{col}: {schema_dict[col]}" for col in schema_dict]
+    fields = [f"{col}: {get_dafny_type(col, schema_dict[col])}" for col in schema_dict]
     fields_str = ", ".join(fields)
     schema_dafny = f"datatype Row = Row({fields_str})"
 
     # 4. Determine key variables
     if query.groupby_columns:
-        types = [schema_dict[col] for col in query.groupby_columns]
+        types = [get_dafny_type(col, schema_dict[col]) for col in query.groupby_columns]
         if len(query.groupby_columns) == 1:
             key_type = types[0]
             ret_type = f"map<{key_type}, int>"

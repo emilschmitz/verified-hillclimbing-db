@@ -38,6 +38,13 @@ def extract_dafny_code(scratchpad_path):
         return None
     return match.group(1).strip()
 
+def get_dafny_type(col: str, col_type: str) -> str:
+    if col_type == 'int':
+        if col.upper() in ('LO_EXTENDEDPRICE', 'LO_ORDTOTALPRICE', 'LO_REVENUE', 'LO_SUPPLYCOST'):
+            return 'bv64'
+        return 'bv32'
+    return col_type
+
 def generate_row_expr(i_val_str="i"):
     """
     Generates a Dafny Row constructor expression dynamically based on the schema,
@@ -61,6 +68,8 @@ def generate_row_expr(i_val_str="i"):
                 expr = f"1000 + ({i_val_str} % 1000)"
             else:
                 expr = f"1 + ({i_val_str} % 100)"
+            
+            expr = f"({expr}) as {get_dafny_type(col, col_type)}"
         else:
             if col == "P_CATEGORY":
                 expr = f'if {i_val_str} % 3 == 0 then "MFGR#12" else "MFGR#14"'
@@ -82,6 +91,7 @@ def generate_row_expr(i_val_str="i"):
     
     return f"Row({', '.join(row_fields)})"
 
+
 def main():
     parser = argparse.ArgumentParser(description="Auto-research benchmarking harness")
     parser.add_argument("-q", "--query", type=int, default=1, help="Query index (1-15) from SSB queries. Default: 1")
@@ -94,9 +104,29 @@ def main():
             "status": "FAILURE",
             "proof_verified": False,
             "latency_us": -1,
-            "compiler_error": f"Invalid query index. Choose 1 to {len(queries)}."
+            "compiler_error": f"Invalid query index. Choose 1 to {len(queries)}.",
+            "transpile_time_ms": -1,
+            "verification_time_ms": -1,
+            "compilation_time_ms": -1
         }))
         sys.exit(1)
+
+    # Global timings to be reported on exit
+    transpile_time_ms = -1
+    verify_time_ms = -1
+    compile_time_ms = -1
+
+    def exit_with_metrics(status, proof_verified, latency_us, compiler_error):
+        print(json.dumps({
+            "status": status,
+            "proof_verified": proof_verified,
+            "latency_us": latency_us,
+            "compiler_error": compiler_error,
+            "transpile_time_ms": transpile_time_ms,
+            "verification_time_ms": verify_time_ms,
+            "compilation_time_ms": compile_time_ms
+        }, indent=2))
+        sys.exit(0)
 
     sql_query = queries[args.query - 1]
     
@@ -109,28 +139,18 @@ def main():
     scratchpad_path = os.path.join(CURRENT_DIR, "agent_scratchpad.md")
     agent_code = extract_dafny_code(scratchpad_path)
     if not agent_code:
-        print(json.dumps({
-            "status": "FAILURE",
-            "proof_verified": False,
-            "latency_us": -1,
-            "compiler_error": "Could not find any ```dafny ... ``` code block in agent_scratchpad.md."
-        }))
-        sys.exit(1)
+        exit_with_metrics("FAILURE", False, -1, "Could not find any ```dafny ... ``` code block in agent_scratchpad.md.")
 
-    # 3. Transpile SQL query to Dafny
+    # 3. Transpile SQL query to Dafny (timing this step)
+    start_transpile = time.perf_counter()
     try:
         dafny_spec = transpile_sql_to_dafny(sql_query, schema)
+        transpile_time_ms = int((time.perf_counter() - start_transpile) * 1000)
     except Exception as e:
-        print(json.dumps({
-            "status": "FAILURE",
-            "proof_verified": False,
-            "latency_us": -1,
-            "compiler_error": f"SQL Transpilation failed: {e}"
-        }))
-        sys.exit(1)
+        transpile_time_ms = int((time.perf_counter() - start_transpile) * 1000)
+        exit_with_metrics("FAILURE", False, -1, f"SQL Transpilation failed: {e}")
 
     # 4. Generate the Main method and full source file
-    # We dynamically construct the generator expression for the dataset size
     row_constructor = generate_row_expr("i")
     
     main_code = f"""
@@ -142,17 +162,17 @@ method {{:verify false}} Main() {{
 """
     
     full_source = f"{dafny_spec}\n\n{agent_code}\n\n{main_code}"
-    
-    # We create a temporary build directory for codegen to keep the stable Cargo workspace cache
+
+    # Setup temp build directory
     temp_build_dir = os.path.join(CURRENT_DIR, "temp_build")
+    shutil.rmtree(temp_build_dir, ignore_errors=True)
     os.makedirs(temp_build_dir, exist_ok=True)
     working_dfy_path = os.path.join(temp_build_dir, "working_query.dfy")
     
     with open(working_dfy_path, "w") as f:
         f.write(full_source)
 
-    # 5. Static Proof Verification
-    # Run dafny verify with timeout
+    # 5. Static Proof Verification (timing this step)
     verify_cmd = [
         "dafny", "verify",
         "--allow-warnings",
@@ -161,7 +181,6 @@ method {{:verify false}} Main() {{
     ]
     
     start_verify = time.perf_counter()
-    verify_time_ms = -1
     try:
         verify_res = subprocess.run(
             verify_cmd,
@@ -173,35 +192,18 @@ method {{:verify false}} Main() {{
         if verify_res.returncode != 0:
             error_msg = verify_res.stdout + "\n" + verify_res.stderr
             shutil.rmtree(temp_build_dir, ignore_errors=True)
-            print(json.dumps({
-                "status": "FAILURE",
-                "proof_verified": False,
-                "latency_us": -1,
-                "compiler_error": f"Dafny verification failed:\n{error_msg.strip()}",
-                "verification_time_ms": verify_time_ms,
-                "compilation_time_ms": -1
-            }))
-            sys.exit(0)
+            exit_with_metrics("FAILURE", False, -1, f"Dafny verification failed:\n{error_msg.strip()}")
     except subprocess.TimeoutExpired:
         verify_time_ms = int((time.perf_counter() - start_verify) * 1000)
         shutil.rmtree(temp_build_dir, ignore_errors=True)
-        print(json.dumps({
-            "status": "FAILURE",
-            "proof_verified": False,
-            "latency_us": -1,
-            "compiler_error": f"Dafny verification timed out after {dafny_verify_timeout} seconds.",
-            "verification_time_ms": verify_time_ms,
-            "compilation_time_ms": -1
-        }))
-        sys.exit(0)
+        exit_with_metrics("FAILURE", False, -1, f"Dafny verification timed out after {dafny_verify_timeout} seconds.")
 
-    # 6. Translate/Build Target Code (Rust) in the temp directory
+    # 6. Translate/Build Target Code (Rust) in the temp directory (timing this step)
     stable_rust_dir = os.path.join(CURRENT_DIR, "working_query-rust")
     temp_rust_dir = os.path.join(temp_build_dir, "working_query-rust")
     needs_full_build = not os.path.exists(stable_rust_dir) or not os.path.exists(os.path.join(stable_rust_dir, "Cargo.toml"))
     
     start_compile = time.perf_counter()
-    compile_time_ms = -1
     if needs_full_build:
         build_cmd = [
             "dafny", "build",
@@ -231,26 +233,10 @@ method {{:verify false}} Main() {{
         if build_res.returncode != 0:
             error_msg = build_res.stdout + "\n" + build_res.stderr
             shutil.rmtree(temp_build_dir, ignore_errors=True)
-            print(json.dumps({
-                "status": "FAILURE",
-                "proof_verified": True,
-                "latency_us": -1,
-                "compiler_error": f"Dafny build (codegen) failed:\n{error_msg.strip()}",
-                "verification_time_ms": verify_time_ms,
-                "compilation_time_ms": -1
-            }))
-            sys.exit(0)
+            exit_with_metrics("FAILURE", True, -1, f"Dafny build (codegen) failed:\n{error_msg.strip()}")
     except subprocess.TimeoutExpired:
         shutil.rmtree(temp_build_dir, ignore_errors=True)
-        print(json.dumps({
-            "status": "FAILURE",
-            "proof_verified": True,
-            "latency_us": -1,
-            "compiler_error": f"Dafny build timed out after {compile_timeout} seconds.",
-            "verification_time_ms": verify_time_ms,
-            "compilation_time_ms": -1
-        }))
-        sys.exit(0)
+        exit_with_metrics("FAILURE", True, -1, f"Dafny build timed out after {compile_timeout} seconds.")
 
     # 6b. Sync generated Rust files into stable, cached workspace
     try:
@@ -268,15 +254,7 @@ method {{:verify false}} Main() {{
                 shutil.copy2(metadata_temp, metadata_stable)
     except Exception as e:
         shutil.rmtree(temp_build_dir, ignore_errors=True)
-        print(json.dumps({
-            "status": "FAILURE",
-            "proof_verified": True,
-            "latency_us": -1,
-            "compiler_error": f"Failed to sync generated Rust source into stable workspace: {e}",
-            "verification_time_ms": verify_time_ms,
-            "compilation_time_ms": -1
-        }))
-        sys.exit(0)
+        exit_with_metrics("FAILURE", True, -1, f"Failed to sync generated Rust source into stable workspace: {e}")
 
     shutil.rmtree(temp_build_dir, ignore_errors=True)
 
@@ -294,39 +272,15 @@ method {{:verify false}} Main() {{
         compile_time_ms = int((time.perf_counter() - start_compile) * 1000)
         if cargo_res.returncode != 0:
             error_msg = cargo_res.stdout + "\n" + cargo_res.stderr
-            print(json.dumps({
-                "status": "FAILURE",
-                "proof_verified": True,
-                "latency_us": -1,
-                "compiler_error": f"Cargo release build failed:\n{error_msg.strip()}",
-                "verification_time_ms": verify_time_ms,
-                "compilation_time_ms": compile_time_ms
-            }))
-            sys.exit(0)
+            exit_with_metrics("FAILURE", True, -1, f"Cargo release build failed:\n{error_msg.strip()}")
     except subprocess.TimeoutExpired:
         compile_time_ms = int((time.perf_counter() - start_compile) * 1000)
-        print(json.dumps({
-            "status": "FAILURE",
-            "proof_verified": True,
-            "latency_us": -1,
-            "compiler_error": f"Cargo build timed out after {compile_timeout} seconds.",
-            "verification_time_ms": verify_time_ms,
-            "compilation_time_ms": compile_time_ms
-        }))
-        sys.exit(0)
+        exit_with_metrics("FAILURE", True, -1, f"Cargo build timed out after {compile_timeout} seconds.")
 
     # 8. Execution and Latency Profiling
     binary_path = os.path.join(stable_rust_dir, "target", "release", "working_query")
     if not os.path.exists(binary_path):
-        print(json.dumps({
-            "status": "FAILURE",
-            "proof_verified": True,
-            "latency_us": -1,
-            "compiler_error": f"Compiled executable not found at {binary_path}.",
-            "verification_time_ms": verify_time_ms,
-            "compilation_time_ms": compile_time_ms
-        }))
-        sys.exit(0)
+        exit_with_metrics("FAILURE", True, -1, f"Compiled executable not found at {binary_path}.")
 
     try:
         start_time = time.perf_counter()
@@ -341,47 +295,16 @@ method {{:verify false}} Main() {{
 
         stdout = run_res.stdout.strip()
         if run_res.returncode != 0:
-            print(json.dumps({
-                "status": "FAILURE",
-                "proof_verified": True,
-                "latency_us": -1,
-                "compiler_error": f"Executable crashed during execution. Return code: {run_res.returncode}\nSTDERR: {run_res.stderr}",
-                "verification_time_ms": verify_time_ms,
-                "compilation_time_ms": compile_time_ms
-            }))
-            sys.exit(0)
+            exit_with_metrics("FAILURE", True, -1, f"Executable crashed during execution. Return code: {run_res.returncode}\nSTDERR: {run_res.stderr}")
         
         if "ERROR" in stdout or "runtime mismatch" in stdout:
-            print(json.dumps({
-                "status": "FAILURE",
-                "proof_verified": True,
-                "latency_us": -1,
-                "compiler_error": f"Runtime mismatch: result of optimized method did not match reference spec.\nSTDOUT: {stdout}",
-                "verification_time_ms": verify_time_ms,
-                "compilation_time_ms": compile_time_ms
-            }))
-            sys.exit(0)
+            exit_with_metrics("FAILURE", True, -1, f"Runtime mismatch: result of optimized method did not match reference spec.\nSTDOUT: {stdout}")
 
         # Successful execution
-        print(json.dumps({
-            "status": "SUCCESS",
-            "proof_verified": True,
-            "latency_us": latency_us,
-            "compiler_error": "",
-            "verification_time_ms": verify_time_ms,
-            "compilation_time_ms": compile_time_ms
-        }, indent=2))
+        exit_with_metrics("SUCCESS", True, latency_us, "")
 
     except subprocess.TimeoutExpired:
-        print(json.dumps({
-            "status": "FAILURE",
-            "proof_verified": True,
-            "latency_us": -1,
-            "compiler_error": "Executable timed out (hung) during benchmarking execution.",
-            "verification_time_ms": verify_time_ms,
-            "compilation_time_ms": compile_time_ms
-        }))
-        sys.exit(0)
+        exit_with_metrics("FAILURE", True, -1, "Executable timed out (hung) during benchmarking execution.")
 
 if __name__ == "__main__":
     main()

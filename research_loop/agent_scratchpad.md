@@ -13,15 +13,17 @@ method RunQuery(data: seq<Row>) returns (res: int)
   ensures res == MethodSpec(data)
 {
   res := 0;
-  var i := 0;
-  while i < |data|
-    invariant 0 <= i <= |data|
+  var min_date: bv32 := 19930101;
+  var max_date: bv32 := 19931231;
+  var min_disc: bv32 := 1;
+  var max_disc: bv32 := 3;
+  var max_qty: bv32 := 25;
+  for i := 0 to |data|
     invariant res + MethodSpec(data[i..]) == MethodSpec(data)
   {
     var row := data[i];
-    var term := if ((((row.LO_ORDERDATE >= 19930101 && row.LO_ORDERDATE <= 19931231) && row.LO_DISCOUNT >= 1) && row.LO_DISCOUNT <= 3) && row.LO_QUANTITY < 25) then row.LO_EXTENDEDPRICE * row.LO_DISCOUNT else 0;
+    var term := if row.LO_ORDERDATE >= min_date && row.LO_ORDERDATE <= max_date && row.LO_DISCOUNT >= min_disc && row.LO_DISCOUNT <= max_disc && row.LO_QUANTITY < max_qty then (row.LO_EXTENDEDPRICE as int) * (row.LO_DISCOUNT as int) else 0;
     res := res + term;
-    i := i + 1;
   }
 }
 ```
