@@ -1,18 +1,3 @@
-# Agent Optimization Scratchpad
-
-## Design Hypothesis
-- Query 4 = SSB Q2.1: GROUP BY D_YEAR, P_BRAND with filter P_CATEGORY='MFGR#12' AND S_REGION='AMERICA'.
-- MethodSpec returns `map<(bv32, string), int>` — NOT int.
-- Accumulate via an imperative map with O(N) per-row update.
-- Use a `MergeMap` ghost helper defined over finite key sets (.Keys union).
-- The loop invariant expresses: `MergeMap(res, MethodSpec(data[i..])) == MethodSpec(data)`
-
-## Correctness & Proof Strategy
-- MergeMap is defined over `m1.Keys + m2.Keys` (both finite) so Dafny can bound the comprehension.
-- Key lemma: at loop end i==len, MethodSpec(data[len..]) == MethodSpec([]) == map[].
-- MergeMap(res, map[]) == res, so res == MethodSpec(data).
-
-## Optimized Code Variant
 ```dafny
 function MergeMap(m1: map<(bv32, string), int>, m2: map<(bv32, string), int>): map<(bv32, string), int>
 {

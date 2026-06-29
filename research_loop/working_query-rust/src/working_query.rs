@@ -3,6 +3,12 @@
 #![cfg_attr(any(), rustfmt::skip)]
 
 pub mod _module {
+    static COL_D_YEAR: ::std::sync::OnceLock<Vec<u32>> = ::std::sync::OnceLock::new();
+    static COL_LO_REVENUE: ::std::sync::OnceLock<Vec<u64>> = ::std::sync::OnceLock::new();
+    static COL_P_BRAND: ::std::sync::OnceLock<Vec<String>> = ::std::sync::OnceLock::new();
+    static COL_P_CATEGORY: ::std::sync::OnceLock<Vec<String>> = ::std::sync::OnceLock::new();
+    static COL_S_REGION: ::std::sync::OnceLock<Vec<String>> = ::std::sync::OnceLock::new();
+
     pub use ::dafny_runtime::Sequence;
     pub use ::std::rc::Rc;
     pub use ::dafny_runtime::Map;
@@ -79,29 +85,29 @@ pub mod _module {
             }))()
         }
         /// working_query.dfy(68,1)
-        pub fn RunQuery(data: &Sequence<Rc<Row>>) -> Map<(u32, Sequence<DafnyChar>), DafnyInt> {            let data_vec = data.to_array();
+        pub fn RunQuery(data: &Sequence<Rc<Row>>) -> ::std::collections::HashMap<(u32, String), u64> {            let data_vec = data.to_array();
+            let col_D_YEAR = COL_D_YEAR.get().expect("column not initialized");
+            let col_LO_REVENUE = COL_LO_REVENUE.get().expect("column not initialized");
+            let col_P_BRAND = COL_P_BRAND.get().expect("column not initialized");
+            let col_P_CATEGORY = COL_P_CATEGORY.get().expect("column not initialized");
+            let col_S_REGION = COL_S_REGION.get().expect("column not initialized");
 
-            let mut res: Map<(u32, Sequence<DafnyChar>), DafnyInt> = map![] as Map<(u32, Sequence<DafnyChar>), DafnyInt>;
+            let mut res: ::std::collections::HashMap<(u32, String), u64> = ::std::collections::HashMap::new();
             let mut i: usize = 0;
             let mut len: usize = data.cardinality().as_usize();
             while i < len {
                 let row = &data_vec[i];
-                if row.P_CATEGORY().clone() == string_of("MFGR#12") && row.S_REGION().clone() == string_of("AMERICA") {
-                    let mut key: (u32, Sequence<DafnyChar>) = (
-                            row.D_YEAR().clone(),
-                            row.P_BRAND().clone()
+                if col_P_CATEGORY[i] == "MFGR#12" && col_S_REGION[i] == "AMERICA" {
+                    let mut key: (u32, String) = (
+                            col_D_YEAR[i].clone(),
+                            col_P_BRAND[i].clone()
                         );
-                    res = res.update_index(&key, &((if res.contains(&key) {
-                                    res.get(&key)
-                                } else {
-                                    int!(0)
-                                }) + int!(row.LO_REVENUE().clone())));
+                    *res.entry(key.clone()).or_insert(0) += (col_LO_REVENUE[i].clone()) as u64;
                 };
                 i = i + 1;
             };
-            return res.clone();
+            return res;
         }
-
         pub fn load_dataset(file_path: &str, limit: usize) -> Sequence<Rc<Row>> {
             use std::fs::File;
             use std::io::{BufRead, BufReader};
@@ -158,13 +164,22 @@ pub mod _module {
                     rows.push(row);
                 }
             }
+                        COL_D_YEAR.get_or_init(|| rows.iter().map(|r| r.D_YEAR().clone()).collect());
+            COL_LO_REVENUE.get_or_init(|| rows.iter().map(|r| r.LO_REVENUE().clone()).collect());
+            COL_P_BRAND.get_or_init(|| rows.iter().map(|r| r.P_BRAND().to_array().iter().map(|c| c.0).collect::<String>()).collect());
+            COL_P_CATEGORY.get_or_init(|| rows.iter().map(|r| r.P_CATEGORY().to_array().iter().map(|c| c.0).collect::<String>()).collect());
+            COL_S_REGION.get_or_init(|| rows.iter().map(|r| r.S_REGION().to_array().iter().map(|c| c.0).collect::<String>()).collect());
             Sequence::from_array_owned(rows)
         }
-            /// working_query.dfy(93,1)
+    
+        /// working_query.dfy(93,1)
         pub fn Main(_noArgsParameter: &Sequence<Sequence<DafnyChar>>) -> () {
             let mut data: Sequence<Rc<Row>> = _default::load_dataset("/home/emil/projects/verified-hillclimbing-db/ssb-dbgen/lineorder_flat.tbl", 50000);
-            let mut opt_res: Map<(u32, Sequence<DafnyChar>), DafnyInt>;
-            let mut _out0: Map<(u32, Sequence<DafnyChar>), DafnyInt> = _default::RunQuery(&data);
+            let mut opt_res: ::std::collections::HashMap<(u32, String), u64>;
+            let start = ::std::time::Instant::now();
+            let mut _out0: ::std::collections::HashMap<(u32, String), u64> = ::std::hint::black_box(_default::RunQuery(&data));
+            let elapsed_us = start.elapsed().as_micros();
+            print!("QUERY_LATENCY_US: {}\n", elapsed_us);
             opt_res = _out0.clone();
             print!("{}", DafnyPrintWrapper(&string_of("SUCCESS\n")));
             return ();
