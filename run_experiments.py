@@ -69,11 +69,12 @@ def generate_cyclic_columns(dataset_size):
 
 def run_duckdb_baseline(query_id, dataset_size):
     print(f"--- Running DuckDB Baseline (Query {query_id}, dataset size {dataset_size}) ---")
-    data_dict = generate_cyclic_columns(dataset_size)
-    df = pd.DataFrame(data_dict)
-    
     con = duckdb.connect(database=':memory:')
-    con.execute("CREATE TABLE lineorder_flat AS SELECT * FROM df")
+    con.execute(f"""
+        CREATE TABLE lineorder_flat AS 
+        SELECT * FROM read_csv('/home/emil/projects/verified-hillclimbing-db/ssb-dbgen/lineorder_flat.tbl', delim='|', header=True)
+        LIMIT {dataset_size}
+    """)
     
     sql = queries[query_id - 1]
     
@@ -193,7 +194,7 @@ def generate_plots(query_id, history_path, duckdb_latency, output_dir):
     plt.close()
     print(f"Time breakdown chart saved to {breakdown_path}")
 
-def run_experiment(query_id, dataset_size, max_iterations):
+def run_experiment(query_id, dataset_size, max_iterations, model=None):
     output_dir = f"experiments/Q{query_id}"
     os.makedirs(output_dir, exist_ok=True)
     
@@ -258,6 +259,16 @@ Optimization guidelines:
 1. Avoid mathematical integers ('int') where possible to prevent heap-allocated 'BigInt' overhead. Use native integers/ranges, or restrict operations.
 2. Minimize index-based sequence retrievals (data[i]) which execute key lookups under the hood.
 3. Write your optimized code inside a ```dafny ... ``` block. Use inductive loop invariants so Dafny/Z3 can verify correctness statically.
+
+IMPORTANT: Before writing any code, read the compilation reference guide at:
+  /home/emil/projects/verified-hillclimbing-db/research_loop/COMPILATION_GUIDE.md
+This explains exactly how your Dafny code will be translated to Rust and what patterns
+the post-processor can and cannot optimize. Writing post-processor-friendly Dafny is
+essential for achieving fast execution — verified-but-slow is not good enough.
+
+Note: The workspace root is `/home/emil/projects/verified-hillclimbing-db`.
+The SQL transpiler queries and schemas are defined in `/home/emil/projects/verified-hillclimbing-db/transpiler/src/sql_transpiler/queries.py`.
+You must write your optimized Dafny method in a ```dafny ... ``` block, and it will be written to `/home/emil/projects/verified-hillclimbing-db/research_loop/agent_scratchpad.md`.
 """
         
         log_file = os.path.join(output_dir, f"iter_{iteration}_agy.log")
@@ -269,6 +280,8 @@ Optimization guidelines:
             "--print", prompt,
             "--dangerously-skip-permissions"
         ]
+        if model:
+            cmd += ["--model", model]
         
         print("Launching agy optimizer agent...")
         agent_start = time.perf_counter()
@@ -372,6 +385,7 @@ if __name__ == "__main__":
     parser.add_argument("-q", "--query", type=int, default=1, help="Query index (1-15)")
     parser.add_argument("-d", "--dataset-size", type=int, default=50000, help="Benchmark dataset size")
     parser.add_argument("-n", "--iterations", type=int, default=5, help="Number of iterations to run")
+    parser.add_argument("-m", "--model", type=str, default=None, help="Model name to pass to agy (e.g. 'Claude Sonnet 4.6 (Thinking)')")
     args = parser.parse_args()
     
-    run_experiment(args.query, args.dataset_size, args.iterations)
+    run_experiment(args.query, args.dataset_size, args.iterations, model=args.model)

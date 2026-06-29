@@ -29,3 +29,4 @@ temp_build/
 *.log
 experiments/
 scratch/
+ssb-dbgen/
