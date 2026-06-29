@@ -382,7 +382,10 @@ method Main() {{
 
     def test_functional_ssb_query1(self):
         """Real SSB Query 1 run through Dafny against a minimal dataset."""
-        from sql_transpiler import queries, schema as ssb_schema
+        import sys
+        import os
+        sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
+        from queries import queries, schema as ssb_schema
         # Build a minimal dataset: 3 rows with all SSB columns present
         minimal_data = []
         for i in range(3):

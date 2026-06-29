@@ -10,7 +10,8 @@ import shutil
 
 CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
 
-from sql_transpiler import transpile_sql_to_dafny, queries, schema
+from sql_transpiler import transpile_sql_to_dafny
+from queries import queries, schema
 
 def load_env(env_path):
     env = {}

@@ -1,7 +1,7 @@
 import duckdb
 import pandas as pd
 import time
-from sql_transpiler import queries
+from queries import queries
 
 def generate_cyclic_columns(dataset_size):
     columns = {

@@ -18,8 +18,8 @@ INPUT_PRICE_PER_M = 1.50   # $1.50 per 1 million input tokens (standard pricing 
 OUTPUT_PRICE_PER_M = 9.00  # $9.00 per 1 million output tokens
 
 
-# Schema and queries from sql_transpiler
-from sql_transpiler import queries, schema
+# Schema and queries from root queries module
+from queries import queries, schema
 
 def generate_cyclic_columns(dataset_size):
     columns = {
@@ -267,7 +267,7 @@ the post-processor can and cannot optimize. Writing post-processor-friendly Dafn
 essential for achieving fast execution — verified-but-slow is not good enough.
 
 Note: The workspace root is `/home/emil/projects/verified-hillclimbing-db`.
-The SQL transpiler queries and schemas are defined in `/home/emil/projects/verified-hillclimbing-db/transpiler/src/sql_transpiler/queries.py`.
+The SQL transpiler queries and schemas are defined in `/home/emil/projects/verified-hillclimbing-db/queries.py`.
 You must write your optimized Dafny method in a ```dafny ... ``` block, and it will be written to `/home/emil/projects/verified-hillclimbing-db/research_loop/agent_scratchpad.md`.
 """
         

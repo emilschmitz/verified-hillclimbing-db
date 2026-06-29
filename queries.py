@@ -1,4 +1,4 @@
-from .transpiler import transpile_sql_to_dafny
+from sql_transpiler import transpile_sql_to_dafny
 
 schema = {
     "LO_ORDERKEY": "int",
