@@ -382,6 +382,7 @@ method Main() {{
 
     def test_functional_ssb_query1(self):
         """Real SSB Query 1 run through Dafny against a minimal dataset."""
+        # Copied from research_loop/ssb_workload.py to keep the test suite self-contained
         ssb_schema = {
             "LO_ORDERKEY": "int",
             "LO_LINENUMBER": "int",
