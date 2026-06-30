@@ -9,6 +9,7 @@
 ## DB Extension
 - [ ] **CREATE SANDBOX FOR AGENT**
   - Setup a secure sandbox environment for the optimizing agent.
+- [ ] Make the choice of optimizing agent completely free. Support user API keys.
 
 ## Future Research & Reference
 - [ ] **Investigate GenDB (arXiv:2603.02081)**
