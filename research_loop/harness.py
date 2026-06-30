@@ -15,7 +15,7 @@ if ROOT_DIR not in sys.path:
     sys.path.insert(0, ROOT_DIR)
 
 from sql_transpiler import transpile_sql_to_dafny
-from queries import queries
+from research_loop.ssb_workload import queries
 from db_extension import DatabaseCatalog
 
 catalog = DatabaseCatalog()

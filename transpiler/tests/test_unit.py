@@ -14,14 +14,14 @@ class TestTranspilerUnit(unittest.TestCase):
     def test_basic_sum(self):
         sql = "SELECT SUM(value) FROM my_table"
         result = transpile_sql_to_dafny(sql, self.schema)
-        self.assertIn("datatype Row = Row(category: string, value: int, age: int, name: string)", result)
+        self.assertIn("datatype Row = Row(category: string, value: bv32, age: bv32, name: string)", result)
         self.assertIn("function MethodSpec(data: seq<Row>): int", result)
-        self.assertIn("row.value + MethodSpec(tail)", result)
+        self.assertIn("(row.value as int) + MethodSpec(tail)", result)
 
     def test_basic_count(self):
         sql = "SELECT COUNT(*) FROM my_table WHERE category = 'A'"
         result = transpile_sql_to_dafny(sql, self.schema)
-        self.assertIn("datatype Row = Row(category: string, value: int, age: int, name: string)", result)
+        self.assertIn("datatype Row = Row(category: string, value: bv32, age: bv32, name: string)", result)
         self.assertIn("function MethodSpec(data: seq<Row>): int", result)
         self.assertIn("var term := if row.category == \"A\" then 1 else 0;", result)
 
@@ -40,7 +40,7 @@ class TestTranspilerUnit(unittest.TestCase):
         result = transpile_sql_to_dafny(sql, self.schema)
         self.assertIn("function MethodSpec(data: seq<Row>): map<string, int>", result)
         self.assertIn("var key := row.category;", result)
-        self.assertIn("tailMap[key := val + row.value]", result)
+        self.assertIn("tailMap[key := val + (row.value as int)]", result)
 
     def test_avg_groupby(self):
         sql = "SELECT category, AVG(value) FROM my_table GROUP BY category"
@@ -53,7 +53,7 @@ class TestTranspilerUnit(unittest.TestCase):
     def test_groupby_int_key(self):
         sql = "SELECT age, SUM(value) FROM my_table GROUP BY age"
         result = transpile_sql_to_dafny(sql, self.schema)
-        self.assertIn("function MethodSpec(data: seq<Row>): map<int, int>", result)
+        self.assertIn("function MethodSpec(data: seq<Row>): map<bv32, int>", result)
         self.assertIn("var key := row.age;", result)
 
     def test_where_multiple_conditions(self):
@@ -94,22 +94,22 @@ class TestTranspilerUnit(unittest.TestCase):
     def test_alias_support(self):
         sql = "SELECT SUM(value) AS val_alias FROM my_table"
         result = transpile_sql_to_dafny(sql, self.schema)
-        self.assertIn("datatype Row = Row(category: string, value: int, age: int, name: string)", result)
+        self.assertIn("datatype Row = Row(category: string, value: bv32, age: bv32, name: string)", result)
         self.assertIn("function MethodSpec(data: seq<Row>): int", result)
-        self.assertIn("row.value + MethodSpec(tail)", result)
+        self.assertIn("(row.value as int) + MethodSpec(tail)", result)
 
         sql_implicit = "SELECT SUM(value) val_alias FROM my_table"
         result_implicit = transpile_sql_to_dafny(sql_implicit, self.schema)
-        self.assertIn("row.value + MethodSpec(tail)", result_implicit)
+        self.assertIn("(row.value as int) + MethodSpec(tail)", result_implicit)
 
     def test_arithmetic_expressions(self):
         sql = "SELECT SUM(value * age) FROM my_table"
         result = transpile_sql_to_dafny(sql, self.schema)
-        self.assertIn("row.value * row.age + MethodSpec(tail)", result)
+        self.assertIn("(row.value as int) * (row.age as int) + MethodSpec(tail)", result)
 
         sql_complex = "SELECT SUM(value * (100 - age) / 2) FROM my_table"
         result_complex = transpile_sql_to_dafny(sql_complex, self.schema)
-        self.assertIn("row.value * (100 - row.age) / 2 + MethodSpec(tail)", result_complex)
+        self.assertIn("(row.value as int) * (100 - (row.age as int)) / 2 + MethodSpec(tail)", result_complex)
 
     def test_ge_le_operators(self):
         sql = "SELECT COUNT(*) FROM my_table WHERE age >= 21 AND value <= 100"
@@ -128,9 +128,9 @@ class TestTranspilerUnit(unittest.TestCase):
     def test_multi_column_groupby(self):
         sql = "SELECT category, age, SUM(value) FROM my_table GROUP BY category, age"
         result = transpile_sql_to_dafny(sql, self.schema)
-        self.assertIn("function MethodSpec(data: seq<Row>): map<(string, int), int>", result)
+        self.assertIn("function MethodSpec(data: seq<Row>): map<(string, bv32), int>", result)
         self.assertIn("var key := (row.category, row.age);", result)
-        self.assertIn("tailMap[key := val + row.value]", result)
+        self.assertIn("tailMap[key := val + (row.value as int)]", result)
 
     def test_division_by_zero_fails(self):
         with self.assertRaises(UnsupportedContractError):
@@ -145,7 +145,7 @@ class TestTranspilerUnit(unittest.TestCase):
     def test_negative_literals(self):
         sql = "SELECT SUM(value * -2) FROM my_table WHERE age > -5"
         result = transpile_sql_to_dafny(sql, self.schema)
-        self.assertIn("row.value * -2", result)
+        self.assertIn("(row.value as int) * -2", result)
         self.assertIn("row.age > -5", result)
 
     def test_between_compiles_to_conjunction(self):

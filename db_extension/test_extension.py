@@ -3,7 +3,7 @@ import pytest
 from db_extension.catalog import DatabaseCatalog
 from db_extension.optimizer import match_query_index, generate_mock_dafny_code, run_optimization_loop
 from sql_transpiler import transpile_sql_to_dafny
-from queries import queries, schema
+from research_loop.ssb_workload import queries, schema
 
 def test_database_catalog():
     catalog = DatabaseCatalog()

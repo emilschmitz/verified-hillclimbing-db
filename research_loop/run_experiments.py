@@ -1,6 +1,6 @@
 import os
-import re
 import sys
+import re
 import json
 import time
 import subprocess
@@ -9,6 +9,17 @@ import shutil
 import pandas as pd
 import duckdb
 import matplotlib.pyplot as plt
+
+# Ensure root directory and local directory are in sys.path
+current_dir = os.path.dirname(os.path.abspath(__file__))
+if os.path.basename(current_dir) == 'research_loop':
+    root_dir = os.path.dirname(current_dir)
+else:
+    root_dir = current_dir
+if root_dir not in sys.path:
+    sys.path.insert(0, root_dir)
+if current_dir not in sys.path:
+    sys.path.insert(0, current_dir)
 
 # Gemini 3.5 Flash Model API Pricing
 # Source: Google Cloud Vertex AI & Google AI Studio official pricing documentation
@@ -19,7 +30,7 @@ OUTPUT_PRICE_PER_M = 9.00  # $9.00 per 1 million output tokens
 
 
 # Schema and queries from root queries module
-from queries import queries, schema
+from research_loop.ssb_workload import queries, schema
 
 def generate_cyclic_columns(dataset_size):
     columns = {

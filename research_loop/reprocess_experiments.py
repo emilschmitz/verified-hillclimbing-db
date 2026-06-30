@@ -1,6 +1,18 @@
 import os
+import sys
 import json
 import subprocess
+
+# Ensure root directory and local directory are in sys.path
+current_dir = os.path.dirname(os.path.abspath(__file__))
+if os.path.basename(current_dir) == 'research_loop':
+    root_dir = os.path.dirname(current_dir)
+else:
+    root_dir = current_dir
+if root_dir not in sys.path:
+    sys.path.insert(0, root_dir)
+if current_dir not in sys.path:
+    sys.path.insert(0, current_dir)
 
 def reprocess_all():
     print("=== Reprocessing Q1-Q5 Experiments with OnceLock Column Projection ===")
@@ -73,7 +85,7 @@ def reprocess_all():
                 json.dump(history, f, indent=2)
                 
             # Regenerate plots
-            from run_experiments import run_duckdb_baseline, generate_plots
+            from research_loop.run_experiments import run_duckdb_baseline, generate_plots
             duckdb_lat = run_duckdb_baseline(q, 50000)
             generate_plots(q, history_path, duckdb_lat, f"experiments/Q{q}")
         else:

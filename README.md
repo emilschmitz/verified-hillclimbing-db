@@ -22,7 +22,7 @@ make install
 make extension
 
 # 3. Start the interactive REPL shell and load the extension
-./run_duckdb_and_load_extension_and_sbb_dataset.sh
+./dbcli.sh
 # In the shell:
 # SELECT hillclimbing('SELECT SUM(LO_EXTENDEDPRICE * LO_DISCOUNT) FROM lineorder_flat WHERE LO_ORDERDATE >= 19930101 AND LO_ORDERDATE <= 19931231 AND LO_DISCOUNT >= 1 AND LO_DISCOUNT <= 3 AND LO_QUANTITY < 25');
 ```
@@ -39,9 +39,9 @@ make extension
 
 ```
 verified-hillclimbing-db/
-├── run_duckdb_and_load_extension_and_sbb_dataset.sh  # Interactive C++ CLI shell launcher
+├── dbcli.sh             # Interactive C++ CLI shell launcher
 ├── TODOS.md             # Consolidated project tasks
-├── queries.py           # Backward-compat query module forwarder
+├── writeup_plan.md      # Write-up plans and outlines
 ├── transpiler/          # SQL → Dafny transpiler (Python package: sql-transpiler)
 │   ├── src/sql_transpiler/
 │   │   └── transpiler.py   # Core transpiler logic
@@ -57,7 +57,11 @@ verified-hillclimbing-db/
 └── research_loop/       # Autonomous optimization loop
     ├── harness.py          # Orchestrator: verify → compile → benchmark
     ├── agent_scratchpad.md # Agent writes optimized RunQuery implementations here
-    └── working_query-rust/ # Cached Cargo workspace for fast incremental builds
+    ├── working_query-rust/ # Cached Cargo workspace for fast incremental builds
+    ├── run_experiments.py  # Optimization experiment runner
+    ├── benchmark_duckdb.py # DuckDB baseline benchmark script
+    ├── reprocess_experiments.py # Evaluation reprocessing tool
+    └── run_batch.sh        # Batch execution helper script
 ```
 
 ## How It Works

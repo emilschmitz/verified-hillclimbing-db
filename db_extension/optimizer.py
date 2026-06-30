@@ -5,7 +5,7 @@ import json
 import subprocess
 import time
 from sql_transpiler import transpile_sql_to_dafny
-from queries import queries, schema
+from research_loop.ssb_workload import queries, schema
 
 # ANSI Color Codes
 COLOR_GREEN = "\033[92m"

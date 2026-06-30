@@ -6,6 +6,6 @@ do
     echo "=========================================="
     echo "Running Query $q..."
     echo "=========================================="
-    uv run python run_experiments.py -q $q -d 50000 -n 1
+    uv run python research_loop/run_experiments.py -q $q -d 50000 -n 1
 done
 echo "=== Batch Experiments Completed! ==="
