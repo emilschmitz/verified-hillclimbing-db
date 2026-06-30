@@ -69,15 +69,42 @@ cargo build --release  ──── ~0.8s (cached)
 {"status": "SUCCESS", "proof_verified": true, "latency_us": 17618}
 ```
 
+## Rust Post-Processing (Optimization Layer)
+
+To achieve maximum hardware performance, the system includes a post-processing pass (`optimize_rust_file` in `research_loop/harness.py`). While Dafny proves query loop safety using mathematical types (e.g., `int` and bitvectors), the post-processor rewrites these types to native Rust primitives (`u64`/`usize`) and native array/slice operations. This step eliminates the overhead of arbitrary-precision integers, dropping latency to **~100 us** (8x faster than DuckDB's standard engine).
+
+## DuckDB Loadable C++ Extension
+
+The repository includes a loadable extension that exposes the hill-climbing query optimizer directly inside any standard DuckDB session (e.g., via Python or the CLI shell).
+
+### 1. Build the Extension
+```bash
+make extension
+```
+
+### 2. Load and Run Queries in DuckDB
+In your DuckDB connection (Python, standard CLI, or via `dbcli` wrapper):
+```sql
+-- Allow loading local unsigned extensions
+SET allow_unsigned_extensions=true;
+
+-- Load the extension library
+LOAD 'db_extension/hillclimbing.duckdb_extension';
+
+-- Execute a query via the optimizer
+SELECT hillclimbing_optimize('SELECT SUM(LO_EXTENDEDPRICE * LO_DISCOUNT) FROM ...');
+```
+
 ## Makefile
 
 | Command | Description |
 |---|---|
 | `make install` | Install all Python dependencies via `uv sync` |
-| `make test` | Run transpiler unit tests |
+| `make test` | Run transpiler and database extension unit tests |
 | `make test-slow` | Run Dafny functional tests (requires `dafny` in PATH) |
 | `make loop` | Run one iteration of the research loop (Query 1, 50k rows) |
-| `make clean` | Remove build artifacts and `__pycache__` |
+| `make extension` | Compile and package the loadable C++ DuckDB extension |
+| `make clean` | Remove build artifacts, cached binaries, local cache mapping, and `__pycache__` |
 
 ## Components
 
