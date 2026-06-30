@@ -58,10 +58,11 @@ verified-hillclimbing-db/
     ├── harness.py          # Orchestrator: verify → compile → benchmark
     ├── agent_scratchpad.md # Agent writes optimized RunQuery implementations here
     ├── working_query-rust/ # Cached Cargo workspace for fast incremental builds
-    ├── run_experiments.py  # Optimization experiment runner
-    ├── benchmark_duckdb.py # DuckDB baseline benchmark script
-    ├── reprocess_experiments.py # Evaluation reprocessing tool
-    └── run_batch.sh        # Batch execution helper script
+    └── scripts/            # Human-facing benchmarking and experiment scripts
+        ├── run_experiments.py  # Optimization experiment runner
+        ├── benchmark_duckdb.py # DuckDB baseline benchmark script
+        ├── reprocess_experiments.py # Evaluation reprocessing tool
+        └── run_batch.sh        # Batch execution helper script
 ```
 
 ## How It Works
