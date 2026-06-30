@@ -88,19 +88,16 @@ def print_result_table(df: pd.DataFrame):
     print(df.to_string(index=False))
 
 def setup_db(con: duckdb.DuckDBPyConnection):
-    tbl_path = "/home/emil/projects/verified-hillclimbing-db/ssb-dbgen/lineorder_flat.tbl"
-    if os.path.exists(tbl_path):
-        print(f"Loading table 'lineorder_flat' from {tbl_path}...")
-        try:
-            con.execute(f"CREATE TABLE lineorder_flat AS SELECT * FROM read_csv('{tbl_path}', delim='|', header=True) LIMIT 50000")
-            print(f"{COLOR_GREEN}Loaded 50,000 rows into 'lineorder_flat'.{COLOR_RESET}")
-            return
-        except Exception as e:
-            print(f"{COLOR_YELLOW}Warning: Failed to load from CSV ({e}). Generating synthetic data...{COLOR_RESET}")
-    else:
-        print(f"{COLOR_YELLOW}Warning: ssb-dbgen/lineorder_flat.tbl not found. Generating synthetic data...{COLOR_RESET}")
+    current_dir = os.path.dirname(os.path.abspath(__file__))
+    root_dir = os.path.dirname(current_dir)
+    tbl_path = os.path.join(root_dir, "ssb-dbgen", "lineorder_flat.tbl")
     
-    df = generate_synthetic_data(50000)
-    con.register("df_synth", df)
-    con.execute("CREATE TABLE lineorder_flat AS SELECT * FROM df_synth")
-    print(f"{COLOR_GREEN}Generated and loaded 50,000 synthetic rows into 'lineorder_flat'.{COLOR_RESET}")
+    if not os.path.exists(tbl_path):
+        raise FileNotFoundError(
+            f"Real SSB flat table not found at {tbl_path}.\n"
+            "Please compile ssb-dbgen, run the generator, and run flatten_ssb.py to build the real dataset."
+        )
+    
+    print(f"Loading table 'lineorder_flat' from {tbl_path}...")
+    con.execute(f"CREATE TABLE lineorder_flat AS SELECT * FROM read_csv('{tbl_path}', delim='|', header=True) LIMIT 50000")
+    print(f"{COLOR_GREEN}Loaded 50,000 rows into 'lineorder_flat'.{COLOR_RESET}")

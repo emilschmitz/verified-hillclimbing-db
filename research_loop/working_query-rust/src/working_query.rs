@@ -84,7 +84,7 @@ pub mod _module {
         pub fn load_dataset(file_path: &str, limit: usize) -> Sequence<Rc<Row>> {
             use std::fs::File;
             use std::io::{BufRead, BufReader};
-            let file = File::open(file_path).expect("failed to open ssb-dbgen/lineorder_flat.tbl");
+            let file = File::open(file_path).unwrap_or_else(|_| panic!("failed to open dataset file at: {}", file_path));
             let reader = BufReader::new(file);
             let mut rows = Vec::new();
             for line in reader.lines().skip(1).take(limit) {
@@ -152,7 +152,8 @@ pub mod _module {
             let start = ::std::time::Instant::now();
             let mut _out0: ::std::collections::HashMap<(u32, String), u64> = ::std::hint::black_box(_default::RunQuery(&data));
             let elapsed_us = start.elapsed().as_micros();
-            print!("QUERY_LATENCY_US: {}\n", elapsed_us);
+            print!("QUERY_LATENCY_US: {}
+", elapsed_us);
             opt_res = _out0.clone();
             print!("{}", DafnyPrintWrapper(&string_of("SUCCESS\n")));
             return ();

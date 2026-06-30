@@ -1,5 +1,9 @@
 # Project TODOS
 
+## Transpiler
+- [ ] Find out what subset of SQL queries would be nice to support and extend the transpiler accordingly
+- [ ] (Down the line) Make the transpiler support all of (ANSI) SQL
+
 ## Research Loop
 - [ ] **CREATE TEST SUITE FOR RUST POSTPROCESSING (29 JUN 26)**
   - The Rust post-processor (`optimize_rust_file` in `research_loop/harness.py`) needs to be extensively unit tested.

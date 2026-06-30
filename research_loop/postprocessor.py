@@ -56,8 +56,7 @@ def postprocess(file_path: str):
     body = body.replace("let mut i: DafnyInt = len.clone();", "let mut i: usize = len;")
     body = body.replace("let mut i: DafnyInt = len;", "let mut i: usize = len;")
     body = re.sub(r"let mut i:\s*(?:u64|DafnyInt)\s*=\s*([a-zA-Z0-9_]+)\.cardinality\(\);", r"let mut i: usize = \1.cardinality().as_usize();", body)
-    body = body.replace("let mut len: DafnyInt = data.cardinality();", "let mut len: usize = data.cardinality().as_usize();")
-    body = body.replace("let mut len: DafnyInt = LO_ORDERDATE.cardinality();", "let mut len: usize = LO_ORDERDATE.cardinality().as_usize();")
+    body = re.sub(r"let mut len: DafnyInt = ([a-zA-Z0-9_]+)\.cardinality\(\);", r"let mut len: usize = \1.cardinality().as_usize();", body)
 
     # Replace loop iterator conditions and increments (applies to all queries)
     body = body.replace("while i.clone() < len.clone() {", "while i < len {")
@@ -79,11 +78,7 @@ def postprocess(file_path: str):
     body = body.replace("i = i.clone() - 1_i32;", "i = i - 1;")
 
     # Replace index accesses to use get_usize instead of get(&DafnyInt) (applies to all queries)
-    body = body.replace("data.get(&i)", "data.get_usize(i)")
-    body = body.replace("LO_ORDERDATE.get(&i)", "LO_ORDERDATE.get_usize(i)")
-    body = body.replace("LO_DISCOUNT.get(&i)", "LO_DISCOUNT.get_usize(i)")
-    body = body.replace("LO_QUANTITY.get(&i)", "LO_QUANTITY.get_usize(i)")
-    body = body.replace("LO_EXTENDEDPRICE.get(&i)", "LO_EXTENDEDPRICE.get_usize(i)")
+    body = re.sub(r"([a-zA-Z0-9_]+)\.get\(&i\)", r"\1.get_usize(i)", body)
 
     if is_scalar:
         # Scalar-only optimizations: convert res and DafnyInt arithmetic to u64
@@ -114,17 +109,26 @@ def postprocess(file_path: str):
     if unwrapping_code:
         body = unwrapping_code + body
     
+    # Detect the loop row variable name dynamically (usually 'row')
+    row_var = "row"
+    row_var_match = re.search(
+        r"let mut ([a-zA-Z0-9_]+):\s*Rc<[a-zA-Z0-9_]+>\s*=\s*[a-zA-Z0-9_]+_vec\[i\]\.clone\(\);",
+        body
+    )
+    if row_var_match:
+        row_var = row_var_match.group(1)
+
     # Optimize Rc<Row> sequence lookup by taking a reference instead of cloning the Rc
     body = re.sub(
-        r"let mut ([a-zA-Z0-9_]+):\s*Rc<Row>\s*=\s*([a-zA-Z0-9_]+)_vec\[i\]\.clone\(\);",
-        r"let \1 = &\2_vec[i];",
+        r"let mut ([a-zA-Z0-9_]+):\s*Rc<([a-zA-Z0-9_]+)>\s*=\s*([a-zA-Z0-9_]+)_vec\[i\]\.clone\(\);",
+        r"let \1 = &\3_vec[i];",
         body
     )
 
     # String comparison optimization (applies to ALL query types)
     body = re.sub(
-        r'row\.([A-Z_]+)\(\)\.clone\(\)\s*==\s*string_of\("([^"]+)"\)',
-        r'row.\1() == "LITERAL_\2"',
+        rf'{row_var}\.([A-Z_]+)\(\)\.clone\(\)\s*==\s*string_of\("([^"]+)"\)',
+        rf'{row_var}.\1() == "LITERAL_\2"',
         body
     )
     body = body.replace('"LITERAL_', '"')
@@ -160,7 +164,7 @@ def postprocess(file_path: str):
         optimized_content_prefix = content[:idx] + header + body + footer
 
     # Column Projection Pass (applies to ALL query types)
-    fields = re.findall(r"row\.([A-Z0-9_]+)\(\)", body)
+    fields = re.findall(rf"{row_var}\.([A-Z0-9_]+)\(\)", body)
     fields = sorted(list(set(fields)))
 
     def get_rust_type(field):
@@ -190,13 +194,13 @@ def postprocess(file_path: str):
             body = retrieval_code + body
         
     for field in fields:
-        body = body.replace(f"row.{field}()", f"col_{field}[i]")
+        body = body.replace(f"{row_var}.{field}()", f"col_{field}[i]")
 
     load_dataset_fn = """
         pub fn load_dataset(file_path: &str, limit: usize) -> Sequence<Rc<Row>> {
             use std::fs::File;
             use std::io::{BufRead, BufReader};
-            let file = File::open(file_path).expect("failed to open ssb-dbgen/lineorder_flat.tbl");
+            let file = File::open(file_path).unwrap_or_else(|_| panic!("failed to open dataset file at: {}", file_path));
             let reader = BufReader::new(file);
             let mut rows = Vec::new();
             for line in reader.lines().skip(1).take(limit) {
@@ -266,40 +270,39 @@ def postprocess(file_path: str):
         matched_block = data_block_match.group(0)
         size_match = re.search(r'integer_range\(Zero::zero\(\),\s*int!\(b"(\d+)"\)\)', matched_block)
         limit = int(size_match.group(1)) if size_match else 50000
-        replacement_block = f'let mut data: Sequence<Rc<Row>> = _default::load_dataset("/home/emil/projects/verified-hillclimbing-db/ssb-dbgen/lineorder_flat.tbl", {limit});'
+        root_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        tbl_path = os.path.join(root_dir, "ssb-dbgen", "lineorder_flat.tbl").replace("\\", "/")
+        replacement_block = f'let mut data: Sequence<Rc<Row>> = _default::load_dataset("{tbl_path}", {limit});'
         optimized_content = optimized_content.replace(matched_block, replacement_block)
     
     # Update Main's variable declarations for _out0 and opt_res to u64, and add timing wrapper
-    optimized_content = optimized_content.replace(
-        "let mut _out0: DafnyInt = _default::RunQuery(&data);",
-        "let start = ::std::time::Instant::now();\n"
-        "            let mut _out0: u64 = ::std::hint::black_box(_default::RunQuery(&data));\n"
-        "            let elapsed_us = start.elapsed().as_micros();\n"
-        "            print!(\"QUERY_LATENCY_US: {}\\n\", elapsed_us);"
-    )
-    optimized_content = optimized_content.replace(
-        "let mut _out0: DafnyInt = _default::RunQuery(&LO_ORDERDATE, &LO_DISCOUNT, &LO_QUANTITY, &LO_EXTENDEDPRICE);",
-        "let start = ::std::time::Instant::now();\n"
-        "            let mut _out0: u64 = ::std::hint::black_box(_default::RunQuery(&LO_ORDERDATE, &LO_DISCOUNT, &LO_QUANTITY, &LO_EXTENDEDPRICE));\n"
-        "            let elapsed_us = start.elapsed().as_micros();\n"
-        "            print!(\"QUERY_LATENCY_US: {}\\n\", elapsed_us);"
+    optimized_content = re.sub(
+        r"let mut _out0:\s*DafnyInt\s*=\s*_default::RunQuery\(([^)]+)\);",
+        'let start = ::std::time::Instant::now();\n'
+        '            let mut _out0: u64 = ::std::hint::black_box(_default::RunQuery(\\1));\n'
+        '            let elapsed_us = start.elapsed().as_micros();\n'
+        '            print!("QUERY_LATENCY_US: {}\\n", elapsed_us);',
+        optimized_content
     )
     if is_scalar:
-        optimized_content = optimized_content.replace(
-            "let mut opt_res: DafnyInt;",
-            "let mut opt_res: u64;"
+        optimized_content = re.sub(
+            r"let mut ([a-zA-Z0-9_]+):\s*DafnyInt\s*;",
+            r"let mut \1: u64;",
+            optimized_content
         )
     else:
-        optimized_content = optimized_content.replace(
-            "let mut _out0: Map<(u32, Sequence<DafnyChar>), DafnyInt> = _default::RunQuery(&data);",
-            "let start = ::std::time::Instant::now();\n"
-            "            let mut _out0: ::std::collections::HashMap<(u32, String), u64> = ::std::hint::black_box(_default::RunQuery(&data));\n"
-            "            let elapsed_us = start.elapsed().as_micros();\n"
-            "            print!(\"QUERY_LATENCY_US: {}\\n\", elapsed_us);"
+        optimized_content = re.sub(
+            r"let mut _out0:\s*Map<\(u32,\s*Sequence<DafnyChar>\),\s*DafnyInt>\s*=\s*_default::RunQuery\(([^)]+)\);",
+            'let start = ::std::time::Instant::now();\n'
+            '            let mut _out0: ::std::collections::HashMap<(u32, String), u64> = ::std::hint::black_box(_default::RunQuery(\\1));\n'
+            '            let elapsed_us = start.elapsed().as_micros();\n'
+            '            print!("QUERY_LATENCY_US: {}\\n", elapsed_us);',
+            optimized_content
         )
-        optimized_content = optimized_content.replace(
-            "let mut opt_res: Map<(u32, Sequence<DafnyChar>), DafnyInt>;",
-            "let mut opt_res: ::std::collections::HashMap<(u32, String), u64>;"
+        optimized_content = re.sub(
+            r"let mut ([a-zA-Z0-9_]+):\s*Map<\(u32,\s*Sequence<DafnyChar>\),\s*DafnyInt>\s*;",
+            r"let mut \1: ::std::collections::HashMap<(u32, String), u64>;",
+            optimized_content
         )
     
     with open(file_path, "w") as f:
