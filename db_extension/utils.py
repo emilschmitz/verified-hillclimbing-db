@@ -12,7 +12,7 @@ COLOR_YELLOW = "\033[93m"
 COLOR_RESET = "\033[0m"
 
 CACHE_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "cache.json")
-BIN_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "bin")
+BIN_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "build", "queries")
 
 def get_sql_hash(sql: str) -> str:
     # Normalize SQL for hashing

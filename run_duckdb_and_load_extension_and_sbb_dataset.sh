@@ -3,14 +3,15 @@ set -e
 
 # Define paths
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-DUCKDB_BIN="$ROOT_DIR/duckdb"
-ZIP_PATH="$ROOT_DIR/duckdb_cli-linux-amd64.zip"
+ZIP_PATH="$ROOT_DIR/build/duckdb_cli-linux-amd64.zip"
+DUCKDB_BIN="$ROOT_DIR/build/duckdb"
 
 # 1. Download official DuckDB CLI if not present
 if [ ! -f "$DUCKDB_BIN" ]; then
     echo "Downloading official DuckDB CLI v1.2.0..."
+    mkdir -p "$ROOT_DIR/build"
     curl -L -o "$ZIP_PATH" https://github.com/duckdb/duckdb/releases/download/v1.2.0/duckdb_cli-linux-amd64.zip
-    unzip -o "$ZIP_PATH" -d "$ROOT_DIR"
+    unzip -o "$ZIP_PATH" -d "$ROOT_DIR/build"
     rm -f "$ZIP_PATH"
     chmod +x "$DUCKDB_BIN"
 fi

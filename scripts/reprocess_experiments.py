@@ -85,7 +85,7 @@ def reprocess_all():
                 json.dump(history, f, indent=2)
                 
             # Regenerate plots
-            from research_loop.scripts.run_experiments import run_duckdb_baseline, generate_plots
+            from scripts.run_experiments import run_duckdb_baseline, generate_plots
             duckdb_lat = run_duckdb_baseline(q, 50000)
             generate_plots(q, history_path, duckdb_lat, f"experiments/Q{q}")
         else:

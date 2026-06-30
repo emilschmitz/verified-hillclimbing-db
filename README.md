@@ -22,7 +22,7 @@ make install
 make extension
 
 # 3. Start the interactive REPL shell and load the extension
-./dbcli.sh
+./run_duckdb_and_load_extension_and_sbb_dataset.sh
 # In the shell:
 # SELECT hillclimbing('SELECT SUM(LO_EXTENDEDPRICE * LO_DISCOUNT) FROM lineorder_flat WHERE LO_ORDERDATE >= 19930101 AND LO_ORDERDATE <= 19931231 AND LO_DISCOUNT >= 1 AND LO_DISCOUNT <= 3 AND LO_QUANTITY < 25');
 ```
@@ -39,7 +39,7 @@ make extension
 
 ```
 verified-hillclimbing-db/
-├── dbcli.sh             # Interactive C++ CLI shell launcher
+├── run_duckdb_and_load_extension_and_sbb_dataset.sh  # Interactive C++ CLI shell launcher
 ├── TODOS.md             # Consolidated project tasks
 ├── writeup_plan.md      # Write-up plans and outlines
 ├── transpiler/          # SQL → Dafny transpiler (Python package: sql-transpiler)
