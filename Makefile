@@ -8,6 +8,7 @@ test: test-unit
 test-unit:
 	uv run pytest transpiler/tests/test_unit.py -v
 	uv run pytest db_extension/test_extension.py -v
+	uv run pytest research_loop/test_postprocessor.py -v
 
 test-slow:
 	RUN_SLOW=1 uv run pytest transpiler/tests/test_functional.py -v
