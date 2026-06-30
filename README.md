@@ -15,11 +15,22 @@ The loop hill-climbs on execution latency while maintaining a formal correctness
 
 ```
 verified-hillclimbing-db/
+├── dbcli                # Interactive CLI wrapper shell script
+├── TODOS.md             # Consolidated project tasks
+├── queries.py           # Backward-compat query module forwarder
 ├── transpiler/          # SQL → Dafny transpiler (Python package: sql-transpiler)
 │   ├── src/sql_transpiler/
 │   │   ├── transpiler.py   # Core transpiler logic
 │   │   └── queries.py      # 15 SSB/TPC-H benchmark queries + lineorder_flat schema
 │   └── tests/
+├── db_extension/        # DuckDB loadable C++ extension and REPL client
+│   ├── src/
+│   │   └── hillclimbing.cpp # C++ extension source registering UDFs
+│   ├── catalog.py       # Dynamic DuckDB schema extractor
+│   ├── optimizer.py     # Optimization orchestrator and loop generator
+│   ├── run_optimizer.py # Subprocess wrapper running the compiled query
+│   ├── dbcli.py         # REPL client delegating to the C++ UDF
+│   └── test_extension.py # Extension unit/integration tests
 └── research_loop/       # Autonomous optimization loop
     ├── harness.py          # Orchestrator: verify → compile → benchmark
     ├── agent_scratchpad.md # Agent writes optimized RunQuery implementations here
