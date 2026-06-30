@@ -17,7 +17,6 @@ pub mod _module {
     pub use ::dafny_runtime::int;
     pub use ::dafny_runtime::map;
     pub use ::dafny_runtime::string_of;
-    pub use ::dafny_runtime::MapBuilder;
     pub use ::dafny_runtime::truncate;
     pub use ::dafny_runtime::euclidian_modulo;
     pub use ::dafny_runtime::integer_range;
@@ -60,31 +59,6 @@ pub mod _module {
             }
         }
         /// working_query.dfy(18,1)
-        pub fn MergeMap(m1: &Map<(u32, Sequence<DafnyChar>), DafnyInt>, m2: &Map<(u32, Sequence<DafnyChar>), DafnyInt>) -> Map<(u32, Sequence<DafnyChar>), DafnyInt> {
-            (&({
-                let mut m1 = m1.clone();
-                let mut m2 = m2.clone();
-                Rc::new(move || -> Map<(u32, Sequence<DafnyChar>), DafnyInt>{
-            let mut _coll0: MapBuilder<(u32, Sequence<DafnyChar>), DafnyInt> = MapBuilder::<(u32, Sequence<DafnyChar>), DafnyInt>::new();
-            for __compr_0 in (&m1.keys().merge(&m2.keys())).iter().cloned() {
-                let mut k: (u32, Sequence<DafnyChar>) = __compr_0.clone();
-                if m1.keys().merge(&m2.keys()).contains(&k) {
-                    _coll0.add(&k, &((if m1.contains(&k) {
-                                m1.get(&k)
-                            } else {
-                                int!(0)
-                            }) + (if m2.contains(&k) {
-                                m2.get(&k)
-                            } else {
-                                int!(0)
-                            })))
-                }
-            }
-            _coll0.build()
-        }) as Rc<dyn ::std::ops::Fn() -> _>
-            }))()
-        }
-        /// working_query.dfy(68,1)
         pub fn RunQuery(data: &Sequence<Rc<Row>>) -> ::std::collections::HashMap<(u32, String), u64> {            let data_vec = data.to_array();
             let col_D_YEAR = COL_D_YEAR.get().expect("column not initialized");
             let col_LO_REVENUE = COL_LO_REVENUE.get().expect("column not initialized");
@@ -93,9 +67,9 @@ pub mod _module {
             let col_S_REGION = COL_S_REGION.get().expect("column not initialized");
 
             let mut res: ::std::collections::HashMap<(u32, String), u64> = ::std::collections::HashMap::new();
-            let mut i: usize = 0;
-            let mut len: usize = data.cardinality().as_usize();
-            while i < len {
+            let mut i: usize = data.cardinality().as_usize();
+            while 0 < i {
+                i = i - 1;
                 let row = &data_vec[i];
                 if col_P_CATEGORY[i] == "MFGR#12" && col_S_REGION[i] == "AMERICA" {
                     let mut key: (u32, String) = (
@@ -103,8 +77,7 @@ pub mod _module {
                             col_P_BRAND[i].clone()
                         );
                     *res.entry(key.clone()).or_insert(0) += (col_LO_REVENUE[i].clone()) as u64;
-                };
-                i = i + 1;
+                }
             };
             return res;
         }
@@ -172,7 +145,7 @@ pub mod _module {
             Sequence::from_array_owned(rows)
         }
     
-        /// working_query.dfy(93,1)
+        /// working_query.dfy(37,1)
         pub fn Main(_noArgsParameter: &Sequence<Sequence<DafnyChar>>) -> () {
             let mut data: Sequence<Rc<Row>> = _default::load_dataset("/home/emil/projects/verified-hillclimbing-db/ssb-dbgen/lineorder_flat.tbl", 50000);
             let mut opt_res: ::std::collections::HashMap<(u32, String), u64>;

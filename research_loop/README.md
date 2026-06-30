@@ -13,7 +13,7 @@ Agent writes RunQuery → harness.py verifies (Dafny/Z3) → compiles (Rust/Carg
 1. **Specification**: `harness.py` transpiles the target SQL query into a Dafny `MethodSpec` (the ground truth).
 2. **Agent Code**: The agent writes an optimized `method RunQuery` into `agent_scratchpad.md`.
 3. **Verification**: Dafny/Z3 formally proves that `RunQuery` satisfies `MethodSpec`. If the proof fails, the loop reports a failure immediately — no binary is produced.
-4. **Compilation**: The verified Dafny code is translated to Rust and compiled to a release binary using `cargo build --release`.
+4. **Compilation**: The verified Dafny code is translated to Rust and postprocessed to optimize performance (NB: this technically breaks the formal verification, see root README for details) and compiled to a release binary using `cargo build --release`.
 5. **Benchmarking**: The binary is executed and wall-clock latency is measured in microseconds.
 6. **Telemetry**: A JSON blob is emitted to stdout for the agent to interpret and iterate on.
 

@@ -30,3 +30,11 @@ temp_build/
 experiments/
 scratch/
 ssb-dbgen/
+
+# DuckDB extension binaries, configure logs, and cache mappings
+db_extension/bin/
+db_extension/cache.json
+db_extension/temp_query.sql
+db_extension/hillclimbing.duckdb_extension
+configure/
+

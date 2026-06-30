@@ -9,9 +9,18 @@ import argparse
 import shutil
 
 CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
+ROOT_DIR = os.path.dirname(CURRENT_DIR)
+import sys
+if ROOT_DIR not in sys.path:
+    sys.path.insert(0, ROOT_DIR)
 
 from sql_transpiler import transpile_sql_to_dafny
-from queries import queries, schema
+from queries import queries
+from db_extension import DatabaseCatalog
+
+catalog = DatabaseCatalog()
+schema = catalog.get_table_schema("lineorder_flat")
+
 
 def load_env(env_path):
     env = {}
@@ -46,6 +55,11 @@ def get_dafny_type(col: str, col_type: str) -> str:
         return 'bv32'
     return col_type
 
+# ==============================================================================
+# TODO: THIS POST-PROCESSOR (optimize_rust_file) NEEDS TO BE EXTENSIVELY
+# UNIT TESTED AND IT HAS NOT BEEN SO FAR! PLEASE ADD UNIT TESTS FOR ALL THE
+# REGEX REPLACEMENTS, TYPE CONVERSIONS, AND REWRITES PERFORMED HERE.
+# ==============================================================================
 # ==============================================================================
 # DESIGN NOTE: The Native u64/usize Approximation Compiler Pass
 # ==============================================================================
@@ -120,15 +134,32 @@ def optimize_rust_file(file_path):
     # Optimize local loop variables to primitive integers (applies to all queries)
     body = body.replace("let mut i: DafnyInt = int!(0);", "let mut i: usize = 0;")
     body = body.replace("let mut i: DafnyInt = int!(0_i32);", "let mut i: usize = 0;")
+    body = body.replace("let mut i: DafnyInt = len.clone();", "let mut i: usize = len;")
+    body = body.replace("let mut i: DafnyInt = len;", "let mut i: usize = len;")
+    body = re.sub(r"let mut i:\s*(?:u64|DafnyInt)\s*=\s*([a-zA-Z0-9_]+)\.cardinality\(\);", r"let mut i: usize = \1.cardinality().as_usize();", body)
     body = body.replace("let mut len: DafnyInt = data.cardinality();", "let mut len: usize = data.cardinality().as_usize();")
     body = body.replace("let mut len: DafnyInt = LO_ORDERDATE.cardinality();", "let mut len: usize = LO_ORDERDATE.cardinality().as_usize();")
 
     # Replace loop iterator conditions and increments (applies to all queries)
     body = body.replace("while i.clone() < len.clone() {", "while i < len {")
+    body = body.replace("while i.clone() > int!(0) {", "while i > 0 {")
+    body = body.replace("while i.clone() > int!(0_i32) {", "while i > 0 {")
+    body = body.replace("while 0 < i.clone() {", "while i > 0 {")
+    body = body.replace("while 0 < i {", "while i > 0 {")
+    body = body.replace("int!(0) < i.clone()", "0 < i")
+    body = body.replace("int!(0_i32) < i.clone()", "0 < i")
+    body = body.replace("int!(0) < i", "0 < i")
+
+
     body = body.replace("i = i.clone() + int!(1);", "i = i + 1;")
     body = body.replace("i = i.clone() + int!(1_i32);", "i = i + 1;")
     body = body.replace("i = i.clone() + 1;", "i = i + 1;")
     body = body.replace("i = i.clone() + 1_i32;", "i = i + 1;")
+    body = body.replace("i = i.clone() - int!(1);", "i = i - 1;")
+    body = body.replace("i = i.clone() - int!(1_i32);", "i = i - 1;")
+    body = body.replace("i = i.clone() - 1;", "i = i - 1;")
+    body = body.replace("i = i.clone() - 1_i32;", "i = i - 1;")
+
 
     # Replace index accesses to use get_usize instead of get(&DafnyInt) (applies to all queries)
     body = body.replace("data.get(&i)", "data.get_usize(i)")
