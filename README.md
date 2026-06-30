@@ -1,14 +1,18 @@
 # Verified Hill-Climbing Query Optimizer
 
-A research database system that uses **Dafny formal verification** to construct provably correct, hardware-optimized query implementations for analytical SQL workloads. It features a dynamically loadable **DuckDB C++ Extension** that intercepts queries, executes an autonomous optimization loop (using Z3 and Rust compilation), and caches query plans for instant execution.
+A DB system that uses Dafny formal verification to construct provably correct, hardware-optimized query implementations for analytical SQL workloads. Packaged as a DuckDB C++ Extension that processes queries by executing an autonomous optimization loop (using Z3 and Rust compilation). Optimized query code is cached for instant execution.
 
 ## What It Does
 
 1. A SQL query is **deterministically transpiled** into a mathematical `MethodSpec` in Dafny — the ground truth.
-2. The **hill-climbing optimizer** uses an agent (or mock mode) to write an optimized `method RunQuery`.
-3. **Dafny/Z3** formally proves that `RunQuery` satisfies `MethodSpec`.
-4. The verified code is **compiled to native Rust** and executed.
-5. Successful optimized binaries are **cached** and loaded directly inside **DuckDB** via the C++ extension.
+2. The hill-climbing optimizer uses an agent (or mock mode) to write an optimized `method RunQuery`.
+3. Dafny/Z3 formally proves that the agents output satisfies `MethodSpec`.
+4. The verified Dafny is compiled to Rust.
+4. We apply some heuristic postprocessing, since the Dafny output is not idiomatic performant Rust.*
+5. The code is compiled and executed.
+6. Successful optimized binaries are **cached** and loaded directly inside **DuckDB** via the C++ extension.
+
+* This means that the final binary is not formally verified, even though the agents outputs are. Making sure this code is minimal and well tested is an ongoing project. Ideally this would give us the same level of practical guarantees of other DBs.
 
 ---
 
@@ -41,79 +45,9 @@ make extension
 verified-hillclimbing-db/
 ├── run_duckdb_and_load_extension_and_sbb_dataset.sh  # Interactive C++ CLI shell launcher
 ├── TODOS.md             # Consolidated project tasks
-├── writeup_plan.md      # Write-up plans and outlines
 ├── transpiler/          # SQL → Dafny transpiler (Python package: sql-transpiler)
-│   ├── src/sql_transpiler/
-│   │   └── transpiler.py   # Core transpiler logic
-│   └── tests/
 ├── db_extension/        # DuckDB loadable C++ extension and REPL helpers
-│   ├── src/
-│   │   └── hillclimbing.cpp # C++ extension source registering UDFs
-│   ├── catalog.py       # Dynamic DuckDB schema extractor
-│   ├── optimizer.py     # Optimization orchestrator and loop generator
-│   ├── run_optimizer.py # Subprocess wrapper running the compiled query
-│   ├── utils.py         # Shared cache handlers and dataset helpers
-│   └── test_extension.py # Extension unit/integration tests
 └── research_loop/       # Autonomous optimization loop
-    ├── harness.py          # Orchestrator: verify → compile → benchmark
-    ├── agent_scratchpad.md # Agent writes optimized RunQuery implementations here
-    ├── working_query-rust/ # Cached Cargo workspace for fast incremental builds
-    └── scripts/            # Human-facing benchmarking and experiment scripts
-        ├── run_experiments.py  # Optimization experiment runner
-        ├── benchmark_duckdb.py # DuckDB baseline benchmark script
-        ├── reprocess_experiments.py # Evaluation reprocessing tool
-        └── run_batch.sh        # Batch execution helper script
-```
-
-## How It Works
-
-```
-SQL query
-   │
-   ▼  transpile_sql_to_dafny()
-Dafny MethodSpec  ◄─── ground truth (immutable)
-   │
-   │  + agent's RunQuery
-   ▼
-dafny verify  ──── Z3 proves RunQuery satisfies MethodSpec
-   │
-   ▼
-dafny translate rs
-   │
-   ▼
-cargo build --release  ──── ~0.8s (cached)
-   │
-   ▼
-./working_query  ──── latency_us measured
-   │
-   ▼
-{"status": "SUCCESS", "proof_verified": true, "latency_us": 17618}
-```
-
-## Rust Post-Processing (Optimization Layer)
-
-To achieve maximum hardware performance, the system includes a post-processing pass (`optimize_rust_file` in `research_loop/harness.py`). While Dafny proves query loop safety using mathematical types (e.g., `int` and bitvectors), the post-processor rewrites these types to native Rust primitives (`u64`/`usize`) and native array/slice operations. This step eliminates the overhead of arbitrary-precision integers, dropping latency to **~100 us** (8x faster than DuckDB's standard engine).
-
-## DuckDB Loadable C++ Extension
-
-The repository includes a loadable extension that exposes the hill-climbing query optimizer directly inside any standard DuckDB session (e.g., via Python or the CLI shell).
-
-### 1. Build the Extension
-```bash
-make extension
-```
-
-### 2. Load and Run Queries in DuckDB
-In your DuckDB connection (Python, standard CLI, or via `dbcli` wrapper):
-```sql
--- Allow loading local unsigned extensions
-SET allow_unsigned_extensions=true;
-
--- Load the extension library
-LOAD 'db_extension/hillclimbing.duckdb_extension';
-
--- Execute a query via the optimizer
-SELECT hillclimbing_optimize('SELECT SUM(LO_EXTENDEDPRICE * LO_DISCOUNT) FROM ...');
 ```
 
 ## Makefile
@@ -127,7 +61,3 @@ SELECT hillclimbing_optimize('SELECT SUM(LO_EXTENDEDPRICE * LO_DISCOUNT) FROM ..
 | `make extension` | Compile and package the loadable C++ DuckDB extension |
 | `make clean` | Remove build artifacts, cached binaries, local cache mapping, and `__pycache__` |
 
-## Components
-
-- **[transpiler/](transpiler/README.md)** — The SQL-to-Dafny transpiler. Supports `SUM`, `COUNT`, `WHERE`, `GROUP BY`, arithmetic expressions, and the full 15-query SSB benchmark suite.
-- **[research_loop/](research_loop/README.md)** — The orchestration harness and agent interface. The agent writes code to `agent_scratchpad.md`; the harness handles all verification, compilation, and benchmarking.
