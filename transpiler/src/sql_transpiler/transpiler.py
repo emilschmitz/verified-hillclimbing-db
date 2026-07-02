@@ -911,8 +911,13 @@ def _build_col_helper(
             key_expr_at_k = f"cols.Get{query.groupby_columns[0]}({idx_var})"
         else:
             key_expr_at_k = f"({', '.join(f'cols.Get{c}({idx_var})' for c in query.groupby_columns)})"
-        term_expr_at_k = _native_i64_term(query.agg_expr_dafny, idx_var) if is_sum else "1"
         val_type = _agg_value_type(query.agg_expr_dafny)
+        term_expr_at_k = (
+            _native_i64_term(query.agg_expr_dafny, idx_var)
+            if val_type == "NativeI64"
+            else (_native_u64_term(query.agg_expr_dafny, idx_var) if is_sum else "1")
+        )
+        add_fn = "AddI64" if val_type == "NativeI64" else "AddU64"
         if len(query.groupby_columns) == 1:
             ret_type = f"map<{get_dafny_type(query.groupby_columns[0], schema_dict[query.groupby_columns[0]])}, {val_type}>"
         else:
@@ -925,7 +930,7 @@ def _build_col_helper(
                 f"  if {cond} then\n"
                 f"    var key := {key_expr_at_k};\n"
                 f"    var val := if key in tail then tail[key] else (0 as {val_type});\n"
-                f"    tail[key := AddI64(val, {term_expr_at_k})]\n"
+                f"    tail[key := {add_fn}(val, {term_expr_at_k})]\n"
                 f"  else\n"
                 f"    tail"
             )
@@ -934,7 +939,7 @@ def _build_col_helper(
                 f"var tail := {func_name}(cols, {idx_var} + 1);\n"
                 f"  var key := {key_expr_at_k};\n"
                 f"  var val := if key in tail then tail[key] else (0 as {val_type});\n"
-                f"  tail[key := AddI64(val, {term_expr_at_k})]"
+                f"  tail[key := {add_fn}(val, {term_expr_at_k})]"
             )
     else:
         term_expr_at_k = _native_u64_term(query.agg_expr_dafny, idx_var) if is_sum else "1"

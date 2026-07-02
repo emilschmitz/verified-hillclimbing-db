@@ -11,6 +11,10 @@ path = "src/q1.rs"
 name = "bench_q11"
 path = "src/q11.rs"
 
+[[bin]]
+name = "bench_q"
+path = "src/bench_q.rs"
+
 [profile.release]
 opt-level = 3
 lto = true

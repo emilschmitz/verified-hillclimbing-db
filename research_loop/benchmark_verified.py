@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Benchmark verified Q1/Q11 against DuckDB and bare Rust baselines."""
+"""Benchmark verified Dafny→Rust vs bare Rust vs DuckDB (hot RunQuery loop, 50k rows)."""
 import os
 import re
 import shutil
@@ -11,6 +11,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 
 from db_extension import DatabaseCatalog
+from research_loop.benchmark_runqueries import RUNQUERIES
 from research_loop.postprocessor import postprocess, inject_hot_loop_main
 from research_loop.ssb_workload import queries
 from sql_transpiler import transpile_sql_to_dafny_columnar, generate_cols_native_rs
@@ -22,73 +23,14 @@ NATIVE_OPS = os.path.join(NATIVE_BRIDGE, "native_ops.rs")
 NATIVE_AGG = os.path.join(NATIVE_BRIDGE, "native_agg.rs")
 TBL = os.path.join(ROOT, "ssb-dbgen", "lineorder_flat.tbl")
 LIMIT = 50000
-
-# Native-optimized RunQuery: extern AddU64/MulU64U32, column locals, no `as int` in hot path.
-Q1_RUNQUERY = """
-method RunQuery(cols: Cols) returns (res: NativeU64)
-  requires ValidCols(cols)
-  ensures res == MethodSpec(cols)
-{
-  res := 0 as NativeU64;
-  var i := cols.n();
-  while i > 0
-    invariant 0 <= i <= cols.n()
-    invariant res as int == MethodSpecHelper(cols, i) as int
-  {
-    i := i - 1;
-    var od := cols.GetLO_ORDERDATE(i);
-    var disc := cols.GetLO_DISCOUNT(i);
-    var qty := cols.GetLO_QUANTITY(i);
-    if 19930101 <= od && od <= 19931231 && 1 <= disc && disc <= 3 && qty < 25 {
-      var ep := cols.GetLO_EXTENDEDPRICE(i);
-      res := AddU64(res, MulU64U32(ep, disc));
-    }
-  }
-}
-"""
-
-# Group-by: NativeAggMap + ghost map (transpiler-recommended pattern; fully verified).
-Q11_RUNQUERY = """
-method RunQuery(cols: Cols) returns (res: map<(NativeU32, string), NativeI64>)
-  requires ValidCols(cols)
-  ensures res == MethodSpec(cols)
-  requires forall j :: 0 <= j < cols.n() ==>
-    -9223372036854775808 <= SubU64ToI64(cols.GetLO_REVENUE(j), cols.GetLO_SUPPLYCOST(j)) as int
-      < 9223372036854775808
-{
-  var agg := new NativeAggMap();
-  ghost var g: map<(NativeU32, string), NativeI64> := map[];
-  var i := cols.n();
-  while i > 0
-    invariant 0 <= i <= cols.n()
-    invariant g == MethodSpecHelper(cols, i)
-    invariant agg.Snapshot() == g
-    invariant forall k :: k in g ==>
-      -9223372036854775808 <= g[k] as int < 9223372036854775808
-  {
-    i := i - 1;
-    if cols.EqAtC_REGION(i, "AMERICA") && cols.EqAtS_REGION(i, "AMERICA")
-       && cols.EqAtP_MFGR(i, "MFGR#1")
-    {
-      var yr := cols.GetD_YEAR(i);
-      var nation := cols.GetC_NATION(i);
-      var key := (yr, nation);
-      var term := SubU64ToI64(cols.GetLO_REVENUE(i), cols.GetLO_SUPPLYCOST(i));
-      agg.Add(yr, nation, term);
-      ghost var prev := if key in g then g[key] else 0 as NativeI64;
-      g := g[key := AddI64(prev, term)];
-    }
-  }
-  res := agg.ToMap();
-}
-"""
+BENCH_QUERIES = sorted(RUNQUERIES.keys())
 
 
 def run_cmd(cmd, cwd=None, timeout=120, env=None):
     return subprocess.run(cmd, cwd=cwd, capture_output=True, text=True, timeout=timeout, env=env)
 
 
-def bench_duckdb(sql: str) -> int:
+def duckdb_connect():
     import duckdb
     con = duckdb.connect()
     con.execute(
@@ -96,6 +38,10 @@ def bench_duckdb(sql: str) -> int:
         f"SELECT * FROM read_csv('{TBL}', delim='|', header=true, quote='\"') "
         f"LIMIT {LIMIT}"
     )
+    return con
+
+
+def bench_duckdb(con, sql: str) -> int:
     for _ in range(2):
         con.execute(sql).fetchall()
     t0 = time.perf_counter()
@@ -103,11 +49,14 @@ def bench_duckdb(sql: str) -> int:
     return int((time.perf_counter() - t0) * 1_000_000)
 
 
-def bench_bare(name: str) -> int:
+def bench_bare(query_idx: int) -> int:
     res = run_cmd(
-        ["cargo", "run", "--release", "--bin", name, TBL, str(LIMIT)],
+        ["cargo", "run", "--release", "--bin", "bench_q", str(query_idx), TBL, str(LIMIT)],
         cwd=os.path.join(RESEARCH, "bench_bare"),
     )
+    if res.returncode != 0:
+        print(res.stdout, res.stderr)
+        return -1
     m = re.search(r"QUERY_LATENCY_US:\s*(\d+)", res.stdout)
     return int(m.group(1)) if m else -1
 
@@ -161,23 +110,29 @@ def bench_verified(query_idx: int, runquery: str) -> tuple[int, bool]:
         return -1, True
 
     bin_path = os.path.join(proj, "target", "release", "bench")
-    r = run_cmd([bin_path], cwd=ROOT, timeout=60)
+    r = run_cmd([bin_path], cwd=ROOT, timeout=120)
     m = re.search(r"QUERY_LATENCY_US:\s*(\d+)", r.stdout)
     return (int(m.group(1)) if m else -1), True
 
 
 def main():
-    q1_sql = queries[0]
-    q11_sql = queries[10]
-    print("=== Benchmarks (50k rows, hot RunQuery loop only) ===")
-    print(f"DuckDB Q1:  {bench_duckdb(q1_sql)} us")
-    print(f"Bare Q1:    {bench_bare('bench_q1')} us")
-    v1, ok1 = bench_verified(1, Q1_RUNQUERY)
-    print(f"Verified Q1: {v1} us (verified={ok1})")
-    print(f"DuckDB Q11: {bench_duckdb(q11_sql)} us")
-    print(f"Bare Q11:   {bench_bare('bench_q11')} us")
-    v11, ok11 = bench_verified(11, Q11_RUNQUERY)
-    print(f"Verified Q11: {v11} us (verified={ok11})")
+    print(f"=== Benchmarks ({LIMIT} rows, hot loop only) ===")
+    print(f"{'Q':>4} {'DuckDB us':>10} {'Bare us':>10} {'Verified us':>12} {'verified':>9}")
+    print("-" * 50)
+
+    con = duckdb_connect()
+    rows = []
+    for qidx in BENCH_QUERIES:
+        sql = queries[qidx - 1]
+        duck = bench_duckdb(con, sql)
+        bare = bench_bare(qidx)
+        ver, ok = bench_verified(qidx, RUNQUERIES[qidx])
+        rows.append((qidx, duck, bare, ver, ok))
+        print(f"{qidx:4d} {duck:10d} {bare:10d} {ver:12d} {str(ok):>9}")
+
+    print("-" * 50)
+    wins = sum(1 for _, d, _, v, ok in rows if ok and v > 0 and v < d)
+    print(f"Verified beats DuckDB on {wins}/{len(rows)} queries")
 
 
 if __name__ == "__main__":
