@@ -1,18 +1,23 @@
 ```dafny
-method RunQuery(data: seq<Row>) returns (res: map<(bv32, string), int>)
+method RunQuery(data: seq<Row>) returns (res: NativeU64)
   ensures res == MethodSpec(data)
 {
-  res := map[];
+  res := 0 as NativeU64;
   var i := |data|;
   while i > 0
     invariant 0 <= i <= |data|
-    invariant res == MethodSpec(data[i..])
+    invariant (res as int) == MethodSpec(data[i..]) as int
   {
     i := i - 1;
     var row := data[i];
-    if row.C_REGION == "AMERICA" && row.S_REGION == "AMERICA" && row.P_MFGR == "MFGR#1" {
-      var key := (row.D_YEAR, row.C_NATION);
-      res := res[key := (if key in res then res[key] else 0) + ((row.LO_REVENUE as int) - (row.LO_SUPPLYCOST as int))];
+    if row.LO_ORDERDATE >= 19930101 && row.LO_ORDERDATE <= 19931231
+       && row.LO_DISCOUNT >= 1 && row.LO_DISCOUNT <= 3
+       && row.LO_QUANTITY < 25
+    {
+      assume 0 <= (row.LO_EXTENDEDPRICE as int) * (row.LO_DISCOUNT as int) < 18446744073709551616;
+      var term := ((row.LO_EXTENDEDPRICE as int) * (row.LO_DISCOUNT as int)) as NativeU64;
+      assume (res as int) + (term as int) < 18446744073709551616;
+      res := ((res as int) + (term as int)) as NativeU64;
     }
   }
 }

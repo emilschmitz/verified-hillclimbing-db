@@ -15,6 +15,8 @@ fn main() {
     let args: Vec<String> = env::args().collect();
     let tbl_path = if args.len() >= 2 { &args[1] } else { "ssb-dbgen/lineorder_flat.tbl" };
 
+    let limit: usize = args.get(2).and_then(|s| s.parse().ok()).unwrap_or(50_000);
+
     // Warm-up: load file into memory, parse into flat columnar vectors.
     let f = File::open(tbl_path).expect("open .tbl");
     let mut rdr = BufReader::new(f);
@@ -38,7 +40,7 @@ fn main() {
     let mut discount:  Vec<u32> = Vec::new();
     let mut quantity:  Vec<u32> = Vec::new();
     let mut extprice:  Vec<u64> = Vec::new();
-    let lines: Vec<String> = rdr.lines().map(|l| l.unwrap()).collect();
+    let lines: Vec<String> = rdr.lines().take(limit).map(|l| l.unwrap()).collect();
     for line in lines {
         let f: Vec<&str> = line.split('|').collect();
         if f.len() <= orderdate_i { continue; }

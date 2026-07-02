@@ -384,33 +384,25 @@ def parse_sql(sql_str: str, schema_dict: dict[str, str]) -> SQLQuery:
     return query
 
 def get_dafny_type(col: str, col_type: str) -> str:
-    """Maps SQL column types to Dafny types.
-
-    Uses the catalog-provided column type (`col_type`), never the column
-    name.  The catalog reads types from DuckDB's `information_schema` so
-    the width signal is already in the type itself — no caller should
-    need to know which columns "should" be wider than what DuckDB reports.
-    """
+    """Maps SQL column types to bounded native Dafny newtypes (compile to Rust primitives)."""
     col_type_lower = col_type.lower()
-    if col_type_lower in ('bigint', 'int8', 'int64', 'hugeint'):
-        return 'bv64'
+    if col_type_lower in ('bigint', 'int8', 'int64', 'hugeint',
+                          'decimal', 'numeric', 'double', 'float8', 'float', 'real'):
+        return 'NativeU64'
     if col_type_lower in ('integer', 'int4', 'int32', 'int',
                           'smallint', 'int2', 'int16',
                           'tinyint', 'int1',
                           'usmallint', 'utinyint', 'uinteger', 'ubigint',
                           'date'):
-        return 'bv32'
+        return 'NativeU32'
     if col_type_lower in ('varchar', 'text', 'string', 'char', 'bpchar'):
         return 'string'
-    # Numeric types with >18 digits of integer part or wide decimal columns:
-    # map to bv64 to be safe.  Smaller numerics also bv64 to avoid losing
-    # precision after aggregation (Dafny bv64 is still unsigned, but our
-    # spec accumulates into mathematical `int` so post-aggregation size is
-    # bounded by the precondition, not the column width).
-    if col_type_lower in ('decimal', 'numeric', 'double', 'float8', 'float', 'real'):
-        return 'bv64'
-    # Unknown — fail loudly so the catalog fix is forced.
     raise UnsupportedContractError(f"Cannot map SQL type {col_type!r} (column {col!r}) to a Dafny type.")
+
+
+def _agg_value_type(agg_expr: str) -> str:
+    """Native accumulator type for map/scalar aggregates."""
+    return 'NativeI64' if '-' in agg_expr else 'NativeU64'
 
 def transpile_sql_to_dafny(sql_str: str, schema_dict: dict[str, str]) -> str:
     """Translates SQL query to mathematical Dafny specification."""
@@ -432,17 +424,18 @@ def transpile_sql_to_dafny(sql_str: str, schema_dict: dict[str, str]) -> str:
     schema_dafny = f"datatype Row = Row({fields_str})"
 
     # 4. Determine key variables
+    val_type = _agg_value_type(query.agg_expr_dafny)
     if query.groupby_columns:
         types = [get_dafny_type(col, schema_dict[col]) for col in query.groupby_columns]
         if len(query.groupby_columns) == 1:
             key_type = types[0]
-            ret_type = f"map<{key_type}, int>"
+            ret_type = f"map<{key_type}, {val_type}>"
             key_expr = f"row.{query.groupby_columns[0]}"
         else:
-            ret_type = f"map<({', '.join(types)}), int>"
+            ret_type = f"map<({', '.join(types)}), {val_type}>"
             key_expr = f"({', '.join(f'row.{col}' for col in query.groupby_columns)})"
     else:
-        ret_type = "int"
+        ret_type = val_type
         key_expr = None
     
     # Construct WHERE clause condition for row
@@ -450,22 +443,19 @@ def transpile_sql_to_dafny(sql_str: str, schema_dict: dict[str, str]) -> str:
 
     # Helper function to generate a SUM or COUNT recursive body
     def make_recursive_body(func_name: str, is_sum: bool, return_type: str):
-        # Base case
         cond = "|data| == 0"
-        then_val = "map[]" if "map" in return_type else "0"
-        
-        # Else case
+        then_val = "map[]" if "map" in return_type else f"0 as {return_type}"
+        term_expr = query.agg_expr_dafny if is_sum else "1"
+
         if query.groupby_columns:
-            # GROUP BY recursive logic
-            term_expr = query.agg_expr_dafny if is_sum else "1"
             if where_expr:
                 else_body = (
                     f"var tailMap := {func_name}(data[1..]);\n"
                     f"var row := data[0];\n"
                     f"if {where_expr} then\n"
                     f"  var key := {key_expr};\n"
-                    f"  var val := if key in tailMap then tailMap[key] else 0;\n"
-                    f"  tailMap[key := val + {term_expr}]\n"
+                    f"  var val := if key in tailMap then tailMap[key] else (0 as {val_type});\n"
+                    f"  tailMap[key := val + ({term_expr}) as {val_type}]\n"
                     f"else\n"
                     f"  tailMap"
                 )
@@ -474,26 +464,25 @@ def transpile_sql_to_dafny(sql_str: str, schema_dict: dict[str, str]) -> str:
                     f"var tailMap := {func_name}(data[1..]);\n"
                     f"var row := data[0];\n"
                     f"var key := {key_expr};\n"
-                    f"var val := if key in tailMap then tailMap[key] else 0;\n"
-                    f"tailMap[key := val + {term_expr}]"
+                    f"var val := if key in tailMap then tailMap[key] else (0 as {val_type});\n"
+                    f"tailMap[key := val + ({term_expr}) as {val_type}]"
                 )
         else:
-            # Single aggregation recursive logic
-            term_expr = query.agg_expr_dafny if is_sum else "1"
+            cast_term = f"({term_expr}) as {return_type}"
             if where_expr:
                 else_body = (
                     f"var row := data[0];\n"
                     f"var tail := data[1..];\n"
-                    f"var term := if {where_expr} then {term_expr} else 0;\n"
-                    f"term + {func_name}(tail)"
+                    f"var term := if {where_expr} then {cast_term} else (0 as {return_type});\n"
+                    f"((term as int) + ({func_name}(tail) as int)) as {return_type}"
                 )
             else:
                 else_body = (
                     f"var row := data[0];\n"
                     f"var tail := data[1..];\n"
-                    f"{term_expr} + {func_name}(tail)"
+                    f"(({cast_term} as int) + ({func_name}(tail) as int)) as {return_type}"
                 )
-                
+
         return DafnyIf(cond, DafnyLiteral(then_val), DafnyLiteral(else_body))
 
     # Generate function definitions based on aggregation type
@@ -551,19 +540,11 @@ def transpile_sql_to_dafny(sql_str: str, schema_dict: dict[str, str]) -> str:
     # the `ensures res == MethodSpec(data)` postcondition.  This trusts the
     # transpiler's emitted spec, not the RunQuery implementation.
     #
-    # SOUNDNESS OF THE POSTPROCESSOR'S int->u64 FLIP
-    # ----------------------------------------------
-    # The postprocessor replaces `DafnyInt` accumulator types with native
-    # `u64`.  This is sound provided `MethodSpec(data) < 2^64`.  For the SSB
-    # workload with 50 k rows and unguarded aggregations, the spec's value
-    # is bounded by `rows * max(bv32 product)` < 50 000 * 2^32 * 2^32 ~=
-    # 2^49, well below 2^64.  Specific queries that might exceed this
-    # (e.g. ones multiplying two bv64 columns) would need an explicit
-    # `requires` precondition on `MethodSpec`; that's not auto-emitted yet.
     functions_dafny = "\n\n".join(func.to_dafny() for func in functions)
     type_definitions = (
-        "type uint64 = x: int | 0 <= x < 18446744073709551616\n"
-        "type uint32 = x: int | 0 <= x < 4294967296\n\n"
+        'newtype {:extern "u32"} NativeU32 = x: int | 0 <= x < 4294967296\n'
+        'newtype {:extern "u64"} NativeU64 = x: int | 0 <= x < 18446744073709551616\n'
+        'newtype {:extern "i64"} NativeI64 = x: int | -9223372036854775808 <= x < 9223372036854775808\n\n'
     )
     return f"{type_definitions}{schema_dafny}\n\n{functions_dafny}"
 

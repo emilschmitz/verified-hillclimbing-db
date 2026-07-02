@@ -26,6 +26,8 @@ fn main() {
     let args: Vec<String> = env::args().collect();
     let tbl_path = if args.len() >= 2 { &args[1] } else { "ssb-dbgen/lineorder_flat.tbl" };
 
+    let limit: usize = args.get(2).and_then(|s| s.parse().ok()).unwrap_or(50_000);
+
     let f = File::open(tbl_path).expect("open .tbl");
     let mut rdr = BufReader::new(f);
     let mut hdr = String::new();
@@ -35,7 +37,7 @@ fn main() {
         name_to_idx.insert(c.trim().to_uppercase(), i);
     }
 
-    let lines: Vec<String> = rdr.lines().map(|l| l.unwrap()).collect();
+    let lines: Vec<String> = rdr.lines().take(limit).map(|l| l.unwrap()).collect();
     let utf = |name: &str, idx: &HashMap<String, usize>, ls: &[String]| -> Vec<String> {
         let i = *idx.get(name).expect("missing col");
         ls.iter().map(|l| {

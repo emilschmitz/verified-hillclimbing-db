@@ -7,6 +7,8 @@ requires-python = ">=3.11"
 dependencies = [
     "sql-transpiler",
     "pytest>=9.1.1",
+    "tree-sitter>=0.25.2",
+    "tree-sitter-rust>=0.24.2",
 ]
 
 [tool.uv.workspace]
