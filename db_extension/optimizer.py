@@ -4,8 +4,11 @@ import sys
 import json
 import subprocess
 import time
-from sql_transpiler import transpile_sql_to_dafny
+from sql_transpiler import transpile_sql_to_dafny_columnar
 from research_loop.ssb_workload import queries, schema
+from research_loop.pipeline_log import log_debug, log_info, log_trace, log_warn
+
+COMPONENT = "optimizer"
 
 # ANSI Color Codes
 COLOR_GREEN = "\033[92m"
@@ -72,6 +75,35 @@ def match_query_index(sql_query: str) -> int:
         return 3
 
     return 1
+
+def write_mock_agent_body(query_id: int, workspace_path: str) -> None:
+    """Write verified columnar RunQuery body for mock mode (from benchmark fixtures)."""
+    from research_loop.benchmark_runqueries import RUNQUERIES
+
+    if query_id not in RUNQUERIES:
+        raise ValueError(f"No mock RunQuery fixture for query {query_id}")
+    full = RUNQUERIES[query_id].strip()
+    m = re.search(r"method\s+RunQuery[^{]+\{", full, re.DOTALL)
+    if not m:
+        raise ValueError(f"Could not parse RunQuery method for query {query_id}")
+    start = m.end()
+    depth, i = 1, start
+    while i < len(full) and depth:
+        if full[i] == "{":
+            depth += 1
+        elif full[i] == "}":
+            depth -= 1
+        i += 1
+    body = full[start : i - 1].strip()
+    body = re.sub(
+        r"MulU64U32\(ep,\s*disc\)",
+        "MulU64U32(ep as NativeU64, disc)",
+        body,
+    )
+    os.makedirs(os.path.dirname(workspace_path), exist_ok=True)
+    with open(workspace_path, "w") as f:
+        f.write("{\n" + body + "\n}\n")
+
 
 def generate_mock_dafny_code(dafny_spec: str) -> str:
     """
@@ -187,15 +219,21 @@ def run_optimization_loop(sql_query: str, dataset_size: int = 50000, max_iterati
     best_iteration = -1
     history = []
 
+    log_info(COMPONENT, "loop_start", f"query_id={query_id}", dataset_size=dataset_size, mock=use_mock)
+
     for iteration in range(1, max_iterations + 1):
+        log_info(COMPONENT, "iteration_start", f"iter={iteration}/{max_iterations}")
         print(f"\n{COLOR_BLUE}Iteration {iteration}:{COLOR_RESET}")
 
         # Step 1: Transpile SQL
+        log_debug(COMPONENT, "transpile_start", "sql_transpiler")
         print("  - Transpiling SQL query to formal Daphne spec...", end="", flush=True)
         t_start = time.perf_counter()
         try:
-            dafny_spec = transpile_sql_to_dafny(sql_query, schema)
-            print(f" {COLOR_GREEN}OK{COLOR_RESET} ({int((time.perf_counter() - t_start)*1000)} ms)")
+            dafny_spec = transpile_sql_to_dafny_columnar(sql_query, schema)
+            ms = int((time.perf_counter() - t_start) * 1000)
+            log_debug(COMPONENT, "transpile_done", f"{ms}ms", spec_bytes=len(dafny_spec))
+            print(f" {COLOR_GREEN}OK{COLOR_RESET} ({ms} ms)")
         except Exception as e:
             print(f" {COLOR_RED}FAILED{COLOR_RESET}")
             print(f"    Error: {e}")
@@ -205,38 +243,44 @@ def run_optimization_loop(sql_query: str, dataset_size: int = 50000, max_iterati
         print("  - Writing optimized query in Daphne...", end="", flush=True)
         if use_mock:
             try:
-                dafny_code = generate_mock_dafny_code(dafny_spec)
-                # Write to agent scratchpad
-                with open(scratchpad_path, "w") as f:
-                    f.write(f"```dafny\n{dafny_code}\n```")
-                print(f" {COLOR_GREEN}OK{COLOR_RESET} (Mock Agent)")
+                agent_body_path = os.path.join(root_dir, "research_loop", "agent_workspace", "runquery_agent.dfy")
+                write_mock_agent_body(query_id, agent_body_path)
+                print(f" {COLOR_GREEN}OK{COLOR_RESET} (Mock Agent, columnar fixture Q{query_id})")
             except Exception as e:
                 print(f" {COLOR_RED}FAILED{COLOR_RESET} (Mock generation failed)")
                 print(f"    Error: {e}")
                 return {"status": "FAILED", "error": f"Mock generation failed: {e}"}
         else:
+            from pathlib import Path
             from research_loop.agent_sandbox import (
                 build_docker_image,
                 docker_image_built,
                 load_agent_config,
                 run_agent_iteration,
+                use_docker,
             )
 
             cfg = load_agent_config()
-            image = cfg.get("AGENT_IMAGE", "verified-hillclimbing-agent:latest")
-            if not docker_image_built(image):
-                print(f"  - Building agent Docker image {image}...", end="", flush=True)
-                try:
-                    build_docker_image(image)
-                    print(f" {COLOR_GREEN}OK{COLOR_RESET}")
-                except Exception as e:
-                    print(f" {COLOR_RED}FAILED{COLOR_RESET}")
-                    return {"status": "FAILED", "error": f"Docker image build failed: {e}"}
-
+            workspace = Path(root_dir) / "research_loop" / "agent_workspace"
             last_error = history[-1]["error"] if history else ""
             last_lat = history[-1]["latency_us"] if history and history[-1].get("proof_verified") else -1
 
-            print("  - Running agent in Docker sandbox...", end="", flush=True)
+            if use_docker(cfg):
+                image = cfg.get("AGENT_IMAGE", "verified-hillclimbing-agent:latest")
+                if not docker_image_built(image):
+                    log_info(COMPONENT, "docker_build_start", f"building {image}")
+                    print(f"  - Building agent Docker image {image}...", end="", flush=True)
+                    try:
+                        build_docker_image(image)
+                        print(f" {COLOR_GREEN}OK{COLOR_RESET}")
+                    except Exception as e:
+                        print(f" {COLOR_RED}FAILED{COLOR_RESET}")
+                        return {"status": "FAILED", "error": f"Docker image build failed: {e}"}
+                print("  - Running agent in Docker sandbox...", end="", flush=True)
+            else:
+                log_info(COMPONENT, "agent_local", "subprocess AGENT_CMD", workspace=str(workspace))
+                print("  - Running agent (local subprocess)...", end="", flush=True)
+
             a_start = time.perf_counter()
             try:
                 body, proc = run_agent_iteration(
@@ -246,9 +290,10 @@ def run_optimization_loop(sql_query: str, dataset_size: int = 50000, max_iterati
                     max_iterations=max_iterations,
                     last_error=last_error,
                     last_latency_us=last_lat,
-                    workspace=os.path.join(root_dir, "research_loop", "agent_workspace"),
+                    workspace=workspace,
                     cfg=cfg,
                 )
+                log_trace(COMPONENT, "agent_body_preview", body[:200])
                 if proc.returncode != 0:
                     err = (proc.stderr or proc.stdout or "agent exited non-zero").strip()
                     print(f" {COLOR_RED}FAILED{COLOR_RESET}")
@@ -278,6 +323,7 @@ def run_optimization_loop(sql_query: str, dataset_size: int = 50000, max_iterati
                 return {"status": "FAILED", "error": str(e)}
 
         # Step 3: Verify and compile and benchmark using harness.py
+        log_debug(COMPONENT, "harness_start", f"q={query_id}", dataset_size=dataset_size)
         print("  - Verifying and compiling Rust binaries...", end="", flush=True)
         h_start = time.perf_counter()
         harness_cmd = [
@@ -285,9 +331,19 @@ def run_optimization_loop(sql_query: str, dataset_size: int = 50000, max_iterati
             "-q", str(query_id),
             "--dataset-size", str(dataset_size)
         ]
+        harness_timeout = 90
+        cfg_path = os.path.join(root_dir, "research_loop", "config.env")
+        if os.path.exists(cfg_path):
+            with open(cfg_path) as f:
+                for line in f:
+                    if line.strip().startswith("COMPILE_TIMEOUT_SEC="):
+                        harness_timeout = int(line.split("=", 1)[1].strip()) + 120
+                        break
         
         try:
-            harness_res = subprocess.run(harness_cmd, cwd=root_dir, capture_output=True, text=True, timeout=90)
+            harness_res = subprocess.run(
+                harness_cmd, cwd=root_dir, capture_output=True, text=True, timeout=harness_timeout
+            )
             h_time = time.perf_counter() - h_start
             
             try:
@@ -300,11 +356,17 @@ def run_optimization_loop(sql_query: str, dataset_size: int = 50000, max_iterati
                     "compiler_error": f"Harness crashed: {harness_res.stderr}"
                 }
             
-            # Print iteration result
             status = metrics["status"]
             proof_verified = metrics["proof_verified"]
             latency = metrics["latency_us"]
-            
+            log_info(
+                COMPONENT,
+                "harness_done",
+                f"status={status} latency_us={latency}",
+                proof_verified=proof_verified,
+                ms=int(h_time * 1000),
+            )
+
             if status == "SUCCESS" and proof_verified:
                 print(f" {COLOR_GREEN}VERIFIED & COMPILED{COLOR_RESET} in {h_time:.1f}s")
                 print(f"    {COLOR_GREEN}Result:{COLOR_RESET} Executed in {COLOR_CYAN}{latency} us{COLOR_RESET}")

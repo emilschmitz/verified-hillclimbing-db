@@ -15,10 +15,13 @@ from __future__ import annotations
 import json
 import os
 import re
+import shutil
 from dataclasses import dataclass, field
+from pathlib import Path
 
 DEFAULT_TBL = "ssb-dbgen/lineorder_flat.tbl"
 DEFAULT_LIMIT = 50000
+NATIVE_BRIDGE = Path(__file__).resolve().parent / "native_bridge" / "src"
 
 
 @dataclass
@@ -49,16 +52,17 @@ def postprocess(
     if "fn RunQuery" not in content:
         return
     state = PostProcessState(tbl_path=tbl_path, row_limit=row_limit)
-    out = _transform(content, state, allow_fast_native_agg=allow_fast_native_agg)
+    out = _transform(content, state, allow_fast_native_agg=allow_fast_native_agg, file_path=file_path)
     with open(file_path, "w") as f:
         f.write(out)
 
 
-def _transform(content: str, state: PostProcessState, *, allow_fast_native_agg: bool = True) -> str:
+def _transform(content: str, state: PostProcessState, *, allow_fast_native_agg: bool = True, file_path: str = "") -> str:
     _extract_row_schema(content, state)
     content = _inject_dataset_loader(content, state)
     content = _inject_native_extern_imports(content)
     content = _inject_native_ops_delegates(content)
+    content = _ensure_native_bridge_modules(content, os.path.dirname(file_path) if file_path else ".")
     content = _optimize_runquery_hot_loop(content)
     if allow_fast_native_agg:
         content = _fix_native_agg_local(content)
@@ -106,6 +110,38 @@ def _inject_native_ops_delegates(content: str) -> str:
         }
 """
     return re.sub(r"(impl _default \{)", r"\1" + delegates, content, count=1)
+
+
+def _ensure_native_bridge_modules(content: str, src_dir: str) -> str:
+    """Copy native_bridge Rust modules and declare them when postprocessor uses them."""
+    needs_ops = "crate::native_ops::" in content
+    needs_agg = "NativeAggMap" in content and "crate::native_agg::" in content
+    if not needs_ops and not needs_agg:
+        return content
+    src = Path(src_dir)
+    src.mkdir(parents=True, exist_ok=True)
+    mods: list[str] = []
+    if needs_ops:
+        shutil.copy2(NATIVE_BRIDGE / "native_ops.rs", src / "native_ops.rs")
+        mods.append("native_ops")
+    if needs_agg:
+        shutil.copy2(NATIVE_BRIDGE / "native_agg.rs", src / "native_agg.rs")
+        mods.append("native_agg")
+    if "pub mod _dafny_externs" not in content and needs_agg:
+        externs = "pub mod _dafny_externs {\n"
+        if "ColsNative" in content:
+            externs += "    pub use crate::cols_native::*;\n"
+        externs += "    pub use crate::native_agg::*;\n    pub use crate::native_ops::*;\n}\n\n"
+        content = externs + content
+    for mod_name in mods:
+        decl = f"pub mod {mod_name};"
+        if decl not in content:
+            anchor = content.find("pub mod _module")
+            if anchor == -1:
+                content = decl + "\n" + content
+            else:
+                content = content[:anchor] + decl + "\n" + content[anchor:]
+    return content
 
 
 def _runquery_span(content: str) -> tuple[int, int] | None:

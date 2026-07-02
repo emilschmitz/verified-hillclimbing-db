@@ -9,4 +9,3 @@ dafny_runtime = { path = "runtime" }
 [[bin]]
 name = "working_query"
 path = "src/working_query.rs"
-

@@ -1,49 +1,570 @@
-# ! [allow (warnings , unconditional_panic)] # ! [allow (nonstandard_style)] # ! [cfg_attr (any () , rustfmt :: skip)] mod dataset; pub mod _module { pub use :: dafny_runtime :: Sequence ; pub use :: std :: rc :: Rc ; pub use :: dafny_runtime :: Map ; pub use :: dafny_runtime :: DafnyChar ; pub use :: dafny_runtime :: DafnyInt ; pub use :: dafny_runtime :: int ; pub use :: dafny_runtime :: map ; pub use :: dafny_runtime :: string_of ; pub use :: dafny_runtime :: seq ; pub use :: dafny_runtime :: DafnyPrintWrapper ; pub use :: std :: fmt :: Debug ; pub use :: std :: fmt :: Formatter ; pub use :: std :: fmt :: Result ; pub use :: dafny_runtime :: DafnyPrint ; pub use :: std :: cmp :: PartialEq ; pub use :: std :: cmp :: Eq ; pub use :: std :: hash :: Hash ; pub use :: std :: hash :: Hasher ; pub use :: std :: convert :: AsRef ; pub struct _default { } impl _default { # [doc = " working_query.dfy(18,1)"] pub fn RunQuery (data : & Sequence < Rc < Row > >) -> :: std :: collections :: HashMap < (u32 , Sequence < DafnyChar >) , u64 > { let mut res : :: std :: collections :: HashMap < (u32 , Sequence < DafnyChar >) , u64 > = :: std :: collections :: HashMap :: new () as :: std :: collections :: HashMap < (u32 , Sequence < DafnyChar >) , u64 > ; let mut i : usize = data . cardinality () . as_usize () ; while 0 < i . clone () { i = i . clone () - 1 ; let mut row : Rc < Row > = data . get_usize (i) ; if row . C_REGION () . clone () == string_of ("AMERICA") && row . S_REGION () . clone () == string_of ("AMERICA") && row . P_MFGR () . clone () == string_of ("MFGR#1") { let mut key : (u32 , Sequence < DafnyChar >) = (row . D_YEAR () . clone () , row . C_NATION () . clone ()) ; res . insert (key . clone () , ((* res . get (& & key) . unwrap_or (& { 0 })) + ((row . LO_REVENUE () . clone () as u64) - (row . LO_SUPPLYCOST () . clone () as u64))) . clone ()) ; } } ; return res . clone () ; } # [doc = " working_query.dfy(37,1)"] pub fn Main (_noArgsParameter : & Sequence < Sequence < DafnyChar > >) -> () { let mut data : Sequence < Rc < Row > > = crate :: dataset :: load_dataset :: < Row > ("ssb-dbgen/lineorder_flat.tbl" , 50000) ; let mut opt_res : :: std :: collections :: HashMap < (u32 , Sequence < DafnyChar >) , u64 > ; let start = :: std :: time :: Instant :: now () ; let mut _out0 : :: std :: collections :: HashMap < (u32 , Sequence < DafnyChar >) , u64 > = :: std :: hint :: black_box (_default :: RunQuery (& data)) ; let elapsed_us = start . elapsed () . as_micros () ; println ! ("QUERY_LATENCY_US: {}" , elapsed_us) ; opt_res = _out0 . clone () ; print ! ("{}" , DafnyPrintWrapper (& string_of ("SUCCESS\n"))) ; return () ; } } # [doc = " working_query.dfy(1,1)"] pub type uint64 = u64 ; # [doc = " working_query.dfy(2,1)"] pub type uint32 = u64 ; # [doc = " working_query.dfy(4,1)"] # [derive (Clone)] pub enum Row { Row { LO_ORDERKEY : u32 , LO_LINENUMBER : u32 , LO_CUSTKEY : u32 , LO_PARTKEY : u32 , LO_SUPPKEY : u32 , LO_ORDERDATE : u32 , LO_ORDERPRIORITY : Sequence < DafnyChar > , LO_SHIPPRIORITY : u32 , LO_QUANTITY : u32 , LO_EXTENDEDPRICE : u64 , LO_ORDTOTALPRICE : u64 , LO_DISCOUNT : u32 , LO_REVENUE : u64 , LO_SUPPLYCOST : u64 , LO_TAX : u32 , LO_COMMITDATE : u32 , LO_SHIPMODE : Sequence < DafnyChar > , C_NAME : Sequence < DafnyChar > , C_ADDRESS : Sequence < DafnyChar > , C_CITY : Sequence < DafnyChar > , C_NATION : Sequence < DafnyChar > , C_REGION : Sequence < DafnyChar > , C_PHONE : Sequence < DafnyChar > , C_MKTSEGMENT : Sequence < DafnyChar > , S_NAME : Sequence < DafnyChar > , S_ADDRESS : Sequence < DafnyChar > , S_CITY : Sequence < DafnyChar > , S_NATION : Sequence < DafnyChar > , S_REGION : Sequence < DafnyChar > , S_PHONE : Sequence < DafnyChar > , P_NAME : Sequence < DafnyChar > , P_MFGR : Sequence < DafnyChar > , P_CATEGORY : Sequence < DafnyChar > , P_BRAND : Sequence < DafnyChar > , P_COLOR : Sequence < DafnyChar > , P_TYPE : Sequence < DafnyChar > , P_SIZE : u32 , P_CONTAINER : Sequence < DafnyChar > , D_YEAR : u32 , D_YEARMONTHNUM : u32 , D_WEEKNUMINYEAR : u32 } }
-    impl crate::dataset::Loadable for crate::_module::Row {
-        fn from_fields(f: &[&str], ci: &std::collections::HashMap<String, usize>) -> Self {
-            crate::_module::Row::Row {
-            D_YEARMONTHNUM: f[ci["D_YEARMONTHNUM"]].parse::<u32>().unwrap(),
-            S_PHONE: string_of(f[ci["S_PHONE"]]),
-            P_CONTAINER: string_of(f[ci["P_CONTAINER"]]),
-            S_NATION: string_of(f[ci["S_NATION"]]),
-            C_MKTSEGMENT: string_of(f[ci["C_MKTSEGMENT"]]),
-            P_CATEGORY: string_of(f[ci["P_CATEGORY"]]),
-            LO_ORDERPRIORITY: string_of(f[ci["LO_ORDERPRIORITY"]]),
-            S_CITY: string_of(f[ci["S_CITY"]]),
-            LO_CUSTKEY: f[ci["LO_CUSTKEY"]].parse::<u32>().unwrap(),
-            P_MFGR: string_of(f[ci["P_MFGR"]]),
-            LO_QUANTITY: f[ci["LO_QUANTITY"]].parse::<u32>().unwrap(),
-            D_YEAR: f[ci["D_YEAR"]].parse::<u32>().unwrap(),
-            LO_LINENUMBER: f[ci["LO_LINENUMBER"]].parse::<u32>().unwrap(),
-            P_COLOR: string_of(f[ci["P_COLOR"]]),
-            LO_ORDTOTALPRICE: f[ci["LO_ORDTOTALPRICE"]].parse::<u64>().unwrap(),
-            C_NAME: string_of(f[ci["C_NAME"]]),
-            LO_SHIPPRIORITY: f[ci["LO_SHIPPRIORITY"]].parse::<u32>().unwrap(),
-            LO_TAX: f[ci["LO_TAX"]].parse::<u32>().unwrap(),
-            D_WEEKNUMINYEAR: f[ci["D_WEEKNUMINYEAR"]].parse::<u32>().unwrap(),
-            LO_PARTKEY: f[ci["LO_PARTKEY"]].parse::<u32>().unwrap(),
-            P_TYPE: string_of(f[ci["P_TYPE"]]),
-            P_NAME: string_of(f[ci["P_NAME"]]),
-            LO_SHIPMODE: string_of(f[ci["LO_SHIPMODE"]]),
-            S_REGION: string_of(f[ci["S_REGION"]]),
-            P_BRAND: string_of(f[ci["P_BRAND"]]),
-            C_REGION: string_of(f[ci["C_REGION"]]),
-            LO_REVENUE: f[ci["LO_REVENUE"]].parse::<u64>().unwrap(),
-            C_PHONE: string_of(f[ci["C_PHONE"]]),
-            LO_SUPPLYCOST: f[ci["LO_SUPPLYCOST"]].parse::<u64>().unwrap(),
-            C_NATION: string_of(f[ci["C_NATION"]]),
-            LO_COMMITDATE: f[ci["LO_COMMITDATE"]].parse::<u32>().unwrap(),
-            LO_ORDERKEY: f[ci["LO_ORDERKEY"]].parse::<u32>().unwrap(),
-            C_ADDRESS: string_of(f[ci["C_ADDRESS"]]),
-            P_SIZE: f[ci["P_SIZE"]].parse::<u32>().unwrap(),
-            S_ADDRESS: string_of(f[ci["S_ADDRESS"]]),
-            C_CITY: string_of(f[ci["C_CITY"]]),
-            LO_ORDERDATE: f[ci["LO_ORDERDATE"]].parse::<u32>().unwrap(),
-            LO_SUPPKEY: f[ci["LO_SUPPKEY"]].parse::<u32>().unwrap(),
-            S_NAME: string_of(f[ci["S_NAME"]]),
-            LO_EXTENDEDPRICE: f[ci["LO_EXTENDEDPRICE"]].parse::<u64>().unwrap(),
-            LO_DISCOUNT: f[ci["LO_DISCOUNT"]].parse::<u32>().unwrap(),
+#![allow(warnings, unconditional_panic)]
+#![allow(nonstandard_style)]
+#![cfg_attr(any(), rustfmt::skip)]
+pub mod cols_native;
+pub mod native_agg;
+pub mod native_ops;
+/// Flattens all imported externs so that they can be accessed from this module
+pub mod _dafny_externs {
+    pub use crate::cols_native::*;
+    pub use crate::native_agg::*;
+    pub use crate::native_ops::*;
+}
+
+pub mod _module {
+    use crate::_dafny_externs::{ColsNative};
+    pub use ::dafny_runtime::Object;
+    pub use ::dafny_runtime::int;
+    pub use ::dafny_runtime::rd;
+    pub use ::dafny_runtime::DafnyInt;
+    pub use ::std::default::Default;
+    pub use ::dafny_runtime::Sequence;
+    pub use ::dafny_runtime::DafnyChar;
+    pub use ::dafny_runtime::DafnyPrintWrapper;
+    pub use ::dafny_runtime::string_of;
+    pub use ::std::cmp::PartialEq;
+    pub use ::std::cmp::Eq;
+    pub use ::std::hash::Hash;
+    pub use ::std::hash::Hasher;
+    pub use ::dafny_runtime::DafnyPrint;
+    pub use ::std::fmt::Formatter;
+    pub use ::std::fmt::Result;
+    pub use ::std::ops::Deref;
+    pub use ::std::mem::transmute;
+    pub use ::std::ops::Add;
+    pub use ::std::ops::Sub;
+    pub use ::std::ops::Mul;
+    pub use ::std::ops::Div;
+    pub use ::std::cmp::PartialOrd;
+    pub use ::std::option::Option;
+    pub use ::std::cmp::Ordering;
+
+    pub struct _default {}
+
+    impl _default {
+        pub fn _native_add_u64(a: u64, b: u64) -> u64 {
+            crate::native_ops::native_add_u64(a, b)
+        }
+        pub fn _native_mul_u64_u32(ep: u64, d: u32) -> u64 {
+            crate::native_ops::native_mul_u64_u32(ep, d)
+        }
+        pub fn _native_sub_u64_i64(a: u64, b: u64) -> i64 {
+            crate::native_ops::native_sub_u64_i64(a, b)
+        }
+        pub fn _native_add_i64(a: i64, b: i64) -> i64 {
+            crate::native_ops::native_add_i64(a, b)
+        }
+
+        /// working_query.dfy(103,1)
+        pub fn ValidCols(cols: &Object<ColsNative>) -> bool {
+            int!(0) <= rd!(cols).n()
+        }
+        /// working_query.dfy(108,1)
+        pub fn MethodSpecHelper(cols: &Object<ColsNative>, k: &DafnyInt) -> u64 {
+            if k.clone() < rd!(cols).n() {
+                if rd!(cols).GetLO_ORDERDATE(k) >= 19940101 && rd!(cols).GetLO_ORDERDATE(k) <= 19940131 && rd!(cols).GetLO_DISCOUNT(k) >= 4 && rd!(cols).GetLO_DISCOUNT(k) <= 6 && rd!(cols).GetLO_QUANTITY(k) >= 26 && rd!(cols).GetLO_QUANTITY(k) <= 35 {
+                    _default::_native_add_u64(_default::MethodSpecHelper(cols, &(k.clone() + int!(1))), _default::_native_mul_u64_u32(rd!(cols).GetLO_EXTENDEDPRICE(k), rd!(cols).GetLO_DISCOUNT(k)))
+                } else {
+                    _default::MethodSpecHelper(cols, &(k.clone() + int!(1)))
+                }
+            } else {
+                0
+            }
+        }
+        /// working_query.dfy(119,1)
+        pub fn MethodSpec(cols: &Object<ColsNative>) -> u64 {
+            _default::MethodSpecHelper(cols, &int!(0))
+        }
+        /// working_query.dfy(143,1)
+        pub fn RunQuery(cols: &Object<ColsNative>) -> u64 {
+            let cols_ref = rd!(cols);
+            let mut res: u64 = <u64 as Default>::default();
+            res = 0;
+            let mut i: usize = cols_ref.n;
+            while i > 0 {
+                i -= 1;
+                let mut od: u32 = cols_ref.GetLO_ORDERDATE_usize(i);
+                let mut disc: u32 = cols_ref.GetLO_DISCOUNT_usize(i);
+                let mut qty: u32 = cols_ref.GetLO_QUANTITY_usize(i);
+                if 19940101 <= od && od <= 19940131 && 4 <= disc && disc <= 6 && 26 <= qty && qty <= 35 {
+                    let mut ep: u64 = cols_ref.GetLO_EXTENDEDPRICE_usize(i);
+                    res = _default::_native_add_u64(res, _default::_native_mul_u64_u32(ep, disc));
+                }
+            };
+            return res;
+        }
+        /// working_query.dfy(168,1)
+        pub fn Main(_noArgsParameter: &Sequence<Sequence<DafnyChar>>) -> () {
+            print!("{}", DafnyPrintWrapper(&string_of("SUCCESS\n")));
+            return ();
+        }
+    }
+
+    /// working_query.dfy(4,1)
+    #[derive(Clone, Copy)]
+    #[repr(transparent)]
+    pub struct _u32(pub u32);
+
+    impl PartialEq
+        for _u32 {
+        fn eq(&self, other: &Self) -> bool {
+            self.0 == other.0
+        }
+    }
+
+    impl Eq
+        for _u32 {}
+
+    impl Hash
+        for _u32 {
+        fn hash<_H: Hasher>(&self, _state: &mut _H) {
+            Hash::hash(&self.0, _state)
+        }
+    }
+
+    impl _u32 {
+        /// Constraint check
+        pub fn is(_source: u32) -> bool {
+            return true;
+        }
+    }
+
+    impl Default
+        for _u32 {
+        /// An element of _u32
+        fn default() -> Self {
+            _u32(Default::default())
+        }
+    }
+
+    impl DafnyPrint
+        for _u32 {
+        /// For Dafny print statements
+        fn fmt_print(&self, _formatter: &mut Formatter, in_seq: bool) -> Result {
+            DafnyPrint::fmt_print(&self.0, _formatter, in_seq)
+        }
+    }
+
+    impl Deref
+        for _u32 {
+        type Target = u32;
+        fn deref(&self) -> &Self::Target {
+            &self.0
+        }
+    }
+
+    impl _u32 {
+        /// SAFETY: The newtype is marked as transparent
+        pub fn _from_ref(o: &u32) -> &Self {
+            unsafe {
+                transmute(o)
             }
         }
     }
- impl Row { # [doc = " Returns a borrow of the field LO_ORDERKEY"] pub fn LO_ORDERKEY (& self) -> & u32 { match self { Row :: Row { LO_ORDERKEY , LO_LINENUMBER , LO_CUSTKEY , LO_PARTKEY , LO_SUPPKEY , LO_ORDERDATE , LO_ORDERPRIORITY , LO_SHIPPRIORITY , LO_QUANTITY , LO_EXTENDEDPRICE , LO_ORDTOTALPRICE , LO_DISCOUNT , LO_REVENUE , LO_SUPPLYCOST , LO_TAX , LO_COMMITDATE , LO_SHIPMODE , C_NAME , C_ADDRESS , C_CITY , C_NATION , C_REGION , C_PHONE , C_MKTSEGMENT , S_NAME , S_ADDRESS , S_CITY , S_NATION , S_REGION , S_PHONE , P_NAME , P_MFGR , P_CATEGORY , P_BRAND , P_COLOR , P_TYPE , P_SIZE , P_CONTAINER , D_YEAR , D_YEARMONTHNUM , D_WEEKNUMINYEAR , } => LO_ORDERKEY , } } # [doc = " Returns a borrow of the field LO_LINENUMBER"] pub fn LO_LINENUMBER (& self) -> & u32 { match self { Row :: Row { LO_ORDERKEY , LO_LINENUMBER , LO_CUSTKEY , LO_PARTKEY , LO_SUPPKEY , LO_ORDERDATE , LO_ORDERPRIORITY , LO_SHIPPRIORITY , LO_QUANTITY , LO_EXTENDEDPRICE , LO_ORDTOTALPRICE , LO_DISCOUNT , LO_REVENUE , LO_SUPPLYCOST , LO_TAX , LO_COMMITDATE , LO_SHIPMODE , C_NAME , C_ADDRESS , C_CITY , C_NATION , C_REGION , C_PHONE , C_MKTSEGMENT , S_NAME , S_ADDRESS , S_CITY , S_NATION , S_REGION , S_PHONE , P_NAME , P_MFGR , P_CATEGORY , P_BRAND , P_COLOR , P_TYPE , P_SIZE , P_CONTAINER , D_YEAR , D_YEARMONTHNUM , D_WEEKNUMINYEAR , } => LO_LINENUMBER , } } # [doc = " Returns a borrow of the field LO_CUSTKEY"] pub fn LO_CUSTKEY (& self) -> & u32 { match self { Row :: Row { LO_ORDERKEY , LO_LINENUMBER , LO_CUSTKEY , LO_PARTKEY , LO_SUPPKEY , LO_ORDERDATE , LO_ORDERPRIORITY , LO_SHIPPRIORITY , LO_QUANTITY , LO_EXTENDEDPRICE , LO_ORDTOTALPRICE , LO_DISCOUNT , LO_REVENUE , LO_SUPPLYCOST , LO_TAX , LO_COMMITDATE , LO_SHIPMODE , C_NAME , C_ADDRESS , C_CITY , C_NATION , C_REGION , C_PHONE , C_MKTSEGMENT , S_NAME , S_ADDRESS , S_CITY , S_NATION , S_REGION , S_PHONE , P_NAME , P_MFGR , P_CATEGORY , P_BRAND , P_COLOR , P_TYPE , P_SIZE , P_CONTAINER , D_YEAR , D_YEARMONTHNUM , D_WEEKNUMINYEAR , } => LO_CUSTKEY , } } # [doc = " Returns a borrow of the field LO_PARTKEY"] pub fn LO_PARTKEY (& self) -> & u32 { match self { Row :: Row { LO_ORDERKEY , LO_LINENUMBER , LO_CUSTKEY , LO_PARTKEY , LO_SUPPKEY , LO_ORDERDATE , LO_ORDERPRIORITY , LO_SHIPPRIORITY , LO_QUANTITY , LO_EXTENDEDPRICE , LO_ORDTOTALPRICE , LO_DISCOUNT , LO_REVENUE , LO_SUPPLYCOST , LO_TAX , LO_COMMITDATE , LO_SHIPMODE , C_NAME , C_ADDRESS , C_CITY , C_NATION , C_REGION , C_PHONE , C_MKTSEGMENT , S_NAME , S_ADDRESS , S_CITY , S_NATION , S_REGION , S_PHONE , P_NAME , P_MFGR , P_CATEGORY , P_BRAND , P_COLOR , P_TYPE , P_SIZE , P_CONTAINER , D_YEAR , D_YEARMONTHNUM , D_WEEKNUMINYEAR , } => LO_PARTKEY , } } # [doc = " Returns a borrow of the field LO_SUPPKEY"] pub fn LO_SUPPKEY (& self) -> & u32 { match self { Row :: Row { LO_ORDERKEY , LO_LINENUMBER , LO_CUSTKEY , LO_PARTKEY , LO_SUPPKEY , LO_ORDERDATE , LO_ORDERPRIORITY , LO_SHIPPRIORITY , LO_QUANTITY , LO_EXTENDEDPRICE , LO_ORDTOTALPRICE , LO_DISCOUNT , LO_REVENUE , LO_SUPPLYCOST , LO_TAX , LO_COMMITDATE , LO_SHIPMODE , C_NAME , C_ADDRESS , C_CITY , C_NATION , C_REGION , C_PHONE , C_MKTSEGMENT , S_NAME , S_ADDRESS , S_CITY , S_NATION , S_REGION , S_PHONE , P_NAME , P_MFGR , P_CATEGORY , P_BRAND , P_COLOR , P_TYPE , P_SIZE , P_CONTAINER , D_YEAR , D_YEARMONTHNUM , D_WEEKNUMINYEAR , } => LO_SUPPKEY , } } # [doc = " Returns a borrow of the field LO_ORDERDATE"] pub fn LO_ORDERDATE (& self) -> & u32 { match self { Row :: Row { LO_ORDERKEY , LO_LINENUMBER , LO_CUSTKEY , LO_PARTKEY , LO_SUPPKEY , LO_ORDERDATE , LO_ORDERPRIORITY , LO_SHIPPRIORITY , LO_QUANTITY , LO_EXTENDEDPRICE , LO_ORDTOTALPRICE , LO_DISCOUNT , LO_REVENUE , LO_SUPPLYCOST , LO_TAX , LO_COMMITDATE , LO_SHIPMODE , C_NAME , C_ADDRESS , C_CITY , C_NATION , C_REGION , C_PHONE , C_MKTSEGMENT , S_NAME , S_ADDRESS , S_CITY , S_NATION , S_REGION , S_PHONE , P_NAME , P_MFGR , P_CATEGORY , P_BRAND , P_COLOR , P_TYPE , P_SIZE , P_CONTAINER , D_YEAR , D_YEARMONTHNUM , D_WEEKNUMINYEAR , } => LO_ORDERDATE , } } # [doc = " Returns a borrow of the field LO_ORDERPRIORITY"] pub fn LO_ORDERPRIORITY (& self) -> & Sequence < DafnyChar > { match self { Row :: Row { LO_ORDERKEY , LO_LINENUMBER , LO_CUSTKEY , LO_PARTKEY , LO_SUPPKEY , LO_ORDERDATE , LO_ORDERPRIORITY , LO_SHIPPRIORITY , LO_QUANTITY , LO_EXTENDEDPRICE , LO_ORDTOTALPRICE , LO_DISCOUNT , LO_REVENUE , LO_SUPPLYCOST , LO_TAX , LO_COMMITDATE , LO_SHIPMODE , C_NAME , C_ADDRESS , C_CITY , C_NATION , C_REGION , C_PHONE , C_MKTSEGMENT , S_NAME , S_ADDRESS , S_CITY , S_NATION , S_REGION , S_PHONE , P_NAME , P_MFGR , P_CATEGORY , P_BRAND , P_COLOR , P_TYPE , P_SIZE , P_CONTAINER , D_YEAR , D_YEARMONTHNUM , D_WEEKNUMINYEAR , } => LO_ORDERPRIORITY , } } # [doc = " Returns a borrow of the field LO_SHIPPRIORITY"] pub fn LO_SHIPPRIORITY (& self) -> & u32 { match self { Row :: Row { LO_ORDERKEY , LO_LINENUMBER , LO_CUSTKEY , LO_PARTKEY , LO_SUPPKEY , LO_ORDERDATE , LO_ORDERPRIORITY , LO_SHIPPRIORITY , LO_QUANTITY , LO_EXTENDEDPRICE , LO_ORDTOTALPRICE , LO_DISCOUNT , LO_REVENUE , LO_SUPPLYCOST , LO_TAX , LO_COMMITDATE , LO_SHIPMODE , C_NAME , C_ADDRESS , C_CITY , C_NATION , C_REGION , C_PHONE , C_MKTSEGMENT , S_NAME , S_ADDRESS , S_CITY , S_NATION , S_REGION , S_PHONE , P_NAME , P_MFGR , P_CATEGORY , P_BRAND , P_COLOR , P_TYPE , P_SIZE , P_CONTAINER , D_YEAR , D_YEARMONTHNUM , D_WEEKNUMINYEAR , } => LO_SHIPPRIORITY , } } # [doc = " Returns a borrow of the field LO_QUANTITY"] pub fn LO_QUANTITY (& self) -> & u32 { match self { Row :: Row { LO_ORDERKEY , LO_LINENUMBER , LO_CUSTKEY , LO_PARTKEY , LO_SUPPKEY , LO_ORDERDATE , LO_ORDERPRIORITY , LO_SHIPPRIORITY , LO_QUANTITY , LO_EXTENDEDPRICE , LO_ORDTOTALPRICE , LO_DISCOUNT , LO_REVENUE , LO_SUPPLYCOST , LO_TAX , LO_COMMITDATE , LO_SHIPMODE , C_NAME , C_ADDRESS , C_CITY , C_NATION , C_REGION , C_PHONE , C_MKTSEGMENT , S_NAME , S_ADDRESS , S_CITY , S_NATION , S_REGION , S_PHONE , P_NAME , P_MFGR , P_CATEGORY , P_BRAND , P_COLOR , P_TYPE , P_SIZE , P_CONTAINER , D_YEAR , D_YEARMONTHNUM , D_WEEKNUMINYEAR , } => LO_QUANTITY , } } # [doc = " Returns a borrow of the field LO_EXTENDEDPRICE"] pub fn LO_EXTENDEDPRICE (& self) -> & u64 { match self { Row :: Row { LO_ORDERKEY , LO_LINENUMBER , LO_CUSTKEY , LO_PARTKEY , LO_SUPPKEY , LO_ORDERDATE , LO_ORDERPRIORITY , LO_SHIPPRIORITY , LO_QUANTITY , LO_EXTENDEDPRICE , LO_ORDTOTALPRICE , LO_DISCOUNT , LO_REVENUE , LO_SUPPLYCOST , LO_TAX , LO_COMMITDATE , LO_SHIPMODE , C_NAME , C_ADDRESS , C_CITY , C_NATION , C_REGION , C_PHONE , C_MKTSEGMENT , S_NAME , S_ADDRESS , S_CITY , S_NATION , S_REGION , S_PHONE , P_NAME , P_MFGR , P_CATEGORY , P_BRAND , P_COLOR , P_TYPE , P_SIZE , P_CONTAINER , D_YEAR , D_YEARMONTHNUM , D_WEEKNUMINYEAR , } => LO_EXTENDEDPRICE , } } # [doc = " Returns a borrow of the field LO_ORDTOTALPRICE"] pub fn LO_ORDTOTALPRICE (& self) -> & u64 { match self { Row :: Row { LO_ORDERKEY , LO_LINENUMBER , LO_CUSTKEY , LO_PARTKEY , LO_SUPPKEY , LO_ORDERDATE , LO_ORDERPRIORITY , LO_SHIPPRIORITY , LO_QUANTITY , LO_EXTENDEDPRICE , LO_ORDTOTALPRICE , LO_DISCOUNT , LO_REVENUE , LO_SUPPLYCOST , LO_TAX , LO_COMMITDATE , LO_SHIPMODE , C_NAME , C_ADDRESS , C_CITY , C_NATION , C_REGION , C_PHONE , C_MKTSEGMENT , S_NAME , S_ADDRESS , S_CITY , S_NATION , S_REGION , S_PHONE , P_NAME , P_MFGR , P_CATEGORY , P_BRAND , P_COLOR , P_TYPE , P_SIZE , P_CONTAINER , D_YEAR , D_YEARMONTHNUM , D_WEEKNUMINYEAR , } => LO_ORDTOTALPRICE , } } # [doc = " Returns a borrow of the field LO_DISCOUNT"] pub fn LO_DISCOUNT (& self) -> & u32 { match self { Row :: Row { LO_ORDERKEY , LO_LINENUMBER , LO_CUSTKEY , LO_PARTKEY , LO_SUPPKEY , LO_ORDERDATE , LO_ORDERPRIORITY , LO_SHIPPRIORITY , LO_QUANTITY , LO_EXTENDEDPRICE , LO_ORDTOTALPRICE , LO_DISCOUNT , LO_REVENUE , LO_SUPPLYCOST , LO_TAX , LO_COMMITDATE , LO_SHIPMODE , C_NAME , C_ADDRESS , C_CITY , C_NATION , C_REGION , C_PHONE , C_MKTSEGMENT , S_NAME , S_ADDRESS , S_CITY , S_NATION , S_REGION , S_PHONE , P_NAME , P_MFGR , P_CATEGORY , P_BRAND , P_COLOR , P_TYPE , P_SIZE , P_CONTAINER , D_YEAR , D_YEARMONTHNUM , D_WEEKNUMINYEAR , } => LO_DISCOUNT , } } # [doc = " Returns a borrow of the field LO_REVENUE"] pub fn LO_REVENUE (& self) -> & u64 { match self { Row :: Row { LO_ORDERKEY , LO_LINENUMBER , LO_CUSTKEY , LO_PARTKEY , LO_SUPPKEY , LO_ORDERDATE , LO_ORDERPRIORITY , LO_SHIPPRIORITY , LO_QUANTITY , LO_EXTENDEDPRICE , LO_ORDTOTALPRICE , LO_DISCOUNT , LO_REVENUE , LO_SUPPLYCOST , LO_TAX , LO_COMMITDATE , LO_SHIPMODE , C_NAME , C_ADDRESS , C_CITY , C_NATION , C_REGION , C_PHONE , C_MKTSEGMENT , S_NAME , S_ADDRESS , S_CITY , S_NATION , S_REGION , S_PHONE , P_NAME , P_MFGR , P_CATEGORY , P_BRAND , P_COLOR , P_TYPE , P_SIZE , P_CONTAINER , D_YEAR , D_YEARMONTHNUM , D_WEEKNUMINYEAR , } => LO_REVENUE , } } # [doc = " Returns a borrow of the field LO_SUPPLYCOST"] pub fn LO_SUPPLYCOST (& self) -> & u64 { match self { Row :: Row { LO_ORDERKEY , LO_LINENUMBER , LO_CUSTKEY , LO_PARTKEY , LO_SUPPKEY , LO_ORDERDATE , LO_ORDERPRIORITY , LO_SHIPPRIORITY , LO_QUANTITY , LO_EXTENDEDPRICE , LO_ORDTOTALPRICE , LO_DISCOUNT , LO_REVENUE , LO_SUPPLYCOST , LO_TAX , LO_COMMITDATE , LO_SHIPMODE , C_NAME , C_ADDRESS , C_CITY , C_NATION , C_REGION , C_PHONE , C_MKTSEGMENT , S_NAME , S_ADDRESS , S_CITY , S_NATION , S_REGION , S_PHONE , P_NAME , P_MFGR , P_CATEGORY , P_BRAND , P_COLOR , P_TYPE , P_SIZE , P_CONTAINER , D_YEAR , D_YEARMONTHNUM , D_WEEKNUMINYEAR , } => LO_SUPPLYCOST , } } # [doc = " Returns a borrow of the field LO_TAX"] pub fn LO_TAX (& self) -> & u32 { match self { Row :: Row { LO_ORDERKEY , LO_LINENUMBER , LO_CUSTKEY , LO_PARTKEY , LO_SUPPKEY , LO_ORDERDATE , LO_ORDERPRIORITY , LO_SHIPPRIORITY , LO_QUANTITY , LO_EXTENDEDPRICE , LO_ORDTOTALPRICE , LO_DISCOUNT , LO_REVENUE , LO_SUPPLYCOST , LO_TAX , LO_COMMITDATE , LO_SHIPMODE , C_NAME , C_ADDRESS , C_CITY , C_NATION , C_REGION , C_PHONE , C_MKTSEGMENT , S_NAME , S_ADDRESS , S_CITY , S_NATION , S_REGION , S_PHONE , P_NAME , P_MFGR , P_CATEGORY , P_BRAND , P_COLOR , P_TYPE , P_SIZE , P_CONTAINER , D_YEAR , D_YEARMONTHNUM , D_WEEKNUMINYEAR , } => LO_TAX , } } # [doc = " Returns a borrow of the field LO_COMMITDATE"] pub fn LO_COMMITDATE (& self) -> & u32 { match self { Row :: Row { LO_ORDERKEY , LO_LINENUMBER , LO_CUSTKEY , LO_PARTKEY , LO_SUPPKEY , LO_ORDERDATE , LO_ORDERPRIORITY , LO_SHIPPRIORITY , LO_QUANTITY , LO_EXTENDEDPRICE , LO_ORDTOTALPRICE , LO_DISCOUNT , LO_REVENUE , LO_SUPPLYCOST , LO_TAX , LO_COMMITDATE , LO_SHIPMODE , C_NAME , C_ADDRESS , C_CITY , C_NATION , C_REGION , C_PHONE , C_MKTSEGMENT , S_NAME , S_ADDRESS , S_CITY , S_NATION , S_REGION , S_PHONE , P_NAME , P_MFGR , P_CATEGORY , P_BRAND , P_COLOR , P_TYPE , P_SIZE , P_CONTAINER , D_YEAR , D_YEARMONTHNUM , D_WEEKNUMINYEAR , } => LO_COMMITDATE , } } # [doc = " Returns a borrow of the field LO_SHIPMODE"] pub fn LO_SHIPMODE (& self) -> & Sequence < DafnyChar > { match self { Row :: Row { LO_ORDERKEY , LO_LINENUMBER , LO_CUSTKEY , LO_PARTKEY , LO_SUPPKEY , LO_ORDERDATE , LO_ORDERPRIORITY , LO_SHIPPRIORITY , LO_QUANTITY , LO_EXTENDEDPRICE , LO_ORDTOTALPRICE , LO_DISCOUNT , LO_REVENUE , LO_SUPPLYCOST , LO_TAX , LO_COMMITDATE , LO_SHIPMODE , C_NAME , C_ADDRESS , C_CITY , C_NATION , C_REGION , C_PHONE , C_MKTSEGMENT , S_NAME , S_ADDRESS , S_CITY , S_NATION , S_REGION , S_PHONE , P_NAME , P_MFGR , P_CATEGORY , P_BRAND , P_COLOR , P_TYPE , P_SIZE , P_CONTAINER , D_YEAR , D_YEARMONTHNUM , D_WEEKNUMINYEAR , } => LO_SHIPMODE , } } # [doc = " Returns a borrow of the field C_NAME"] pub fn C_NAME (& self) -> & Sequence < DafnyChar > { match self { Row :: Row { LO_ORDERKEY , LO_LINENUMBER , LO_CUSTKEY , LO_PARTKEY , LO_SUPPKEY , LO_ORDERDATE , LO_ORDERPRIORITY , LO_SHIPPRIORITY , LO_QUANTITY , LO_EXTENDEDPRICE , LO_ORDTOTALPRICE , LO_DISCOUNT , LO_REVENUE , LO_SUPPLYCOST , LO_TAX , LO_COMMITDATE , LO_SHIPMODE , C_NAME , C_ADDRESS , C_CITY , C_NATION , C_REGION , C_PHONE , C_MKTSEGMENT , S_NAME , S_ADDRESS , S_CITY , S_NATION , S_REGION , S_PHONE , P_NAME , P_MFGR , P_CATEGORY , P_BRAND , P_COLOR , P_TYPE , P_SIZE , P_CONTAINER , D_YEAR , D_YEARMONTHNUM , D_WEEKNUMINYEAR , } => C_NAME , } } # [doc = " Returns a borrow of the field C_ADDRESS"] pub fn C_ADDRESS (& self) -> & Sequence < DafnyChar > { match self { Row :: Row { LO_ORDERKEY , LO_LINENUMBER , LO_CUSTKEY , LO_PARTKEY , LO_SUPPKEY , LO_ORDERDATE , LO_ORDERPRIORITY , LO_SHIPPRIORITY , LO_QUANTITY , LO_EXTENDEDPRICE , LO_ORDTOTALPRICE , LO_DISCOUNT , LO_REVENUE , LO_SUPPLYCOST , LO_TAX , LO_COMMITDATE , LO_SHIPMODE , C_NAME , C_ADDRESS , C_CITY , C_NATION , C_REGION , C_PHONE , C_MKTSEGMENT , S_NAME , S_ADDRESS , S_CITY , S_NATION , S_REGION , S_PHONE , P_NAME , P_MFGR , P_CATEGORY , P_BRAND , P_COLOR , P_TYPE , P_SIZE , P_CONTAINER , D_YEAR , D_YEARMONTHNUM , D_WEEKNUMINYEAR , } => C_ADDRESS , } } # [doc = " Returns a borrow of the field C_CITY"] pub fn C_CITY (& self) -> & Sequence < DafnyChar > { match self { Row :: Row { LO_ORDERKEY , LO_LINENUMBER , LO_CUSTKEY , LO_PARTKEY , LO_SUPPKEY , LO_ORDERDATE , LO_ORDERPRIORITY , LO_SHIPPRIORITY , LO_QUANTITY , LO_EXTENDEDPRICE , LO_ORDTOTALPRICE , LO_DISCOUNT , LO_REVENUE , LO_SUPPLYCOST , LO_TAX , LO_COMMITDATE , LO_SHIPMODE , C_NAME , C_ADDRESS , C_CITY , C_NATION , C_REGION , C_PHONE , C_MKTSEGMENT , S_NAME , S_ADDRESS , S_CITY , S_NATION , S_REGION , S_PHONE , P_NAME , P_MFGR , P_CATEGORY , P_BRAND , P_COLOR , P_TYPE , P_SIZE , P_CONTAINER , D_YEAR , D_YEARMONTHNUM , D_WEEKNUMINYEAR , } => C_CITY , } } # [doc = " Returns a borrow of the field C_NATION"] pub fn C_NATION (& self) -> & Sequence < DafnyChar > { match self { Row :: Row { LO_ORDERKEY , LO_LINENUMBER , LO_CUSTKEY , LO_PARTKEY , LO_SUPPKEY , LO_ORDERDATE , LO_ORDERPRIORITY , LO_SHIPPRIORITY , LO_QUANTITY , LO_EXTENDEDPRICE , LO_ORDTOTALPRICE , LO_DISCOUNT , LO_REVENUE , LO_SUPPLYCOST , LO_TAX , LO_COMMITDATE , LO_SHIPMODE , C_NAME , C_ADDRESS , C_CITY , C_NATION , C_REGION , C_PHONE , C_MKTSEGMENT , S_NAME , S_ADDRESS , S_CITY , S_NATION , S_REGION , S_PHONE , P_NAME , P_MFGR , P_CATEGORY , P_BRAND , P_COLOR , P_TYPE , P_SIZE , P_CONTAINER , D_YEAR , D_YEARMONTHNUM , D_WEEKNUMINYEAR , } => C_NATION , } } # [doc = " Returns a borrow of the field C_REGION"] pub fn C_REGION (& self) -> & Sequence < DafnyChar > { match self { Row :: Row { LO_ORDERKEY , LO_LINENUMBER , LO_CUSTKEY , LO_PARTKEY , LO_SUPPKEY , LO_ORDERDATE , LO_ORDERPRIORITY , LO_SHIPPRIORITY , LO_QUANTITY , LO_EXTENDEDPRICE , LO_ORDTOTALPRICE , LO_DISCOUNT , LO_REVENUE , LO_SUPPLYCOST , LO_TAX , LO_COMMITDATE , LO_SHIPMODE , C_NAME , C_ADDRESS , C_CITY , C_NATION , C_REGION , C_PHONE , C_MKTSEGMENT , S_NAME , S_ADDRESS , S_CITY , S_NATION , S_REGION , S_PHONE , P_NAME , P_MFGR , P_CATEGORY , P_BRAND , P_COLOR , P_TYPE , P_SIZE , P_CONTAINER , D_YEAR , D_YEARMONTHNUM , D_WEEKNUMINYEAR , } => C_REGION , } } # [doc = " Returns a borrow of the field C_PHONE"] pub fn C_PHONE (& self) -> & Sequence < DafnyChar > { match self { Row :: Row { LO_ORDERKEY , LO_LINENUMBER , LO_CUSTKEY , LO_PARTKEY , LO_SUPPKEY , LO_ORDERDATE , LO_ORDERPRIORITY , LO_SHIPPRIORITY , LO_QUANTITY , LO_EXTENDEDPRICE , LO_ORDTOTALPRICE , LO_DISCOUNT , LO_REVENUE , LO_SUPPLYCOST , LO_TAX , LO_COMMITDATE , LO_SHIPMODE , C_NAME , C_ADDRESS , C_CITY , C_NATION , C_REGION , C_PHONE , C_MKTSEGMENT , S_NAME , S_ADDRESS , S_CITY , S_NATION , S_REGION , S_PHONE , P_NAME , P_MFGR , P_CATEGORY , P_BRAND , P_COLOR , P_TYPE , P_SIZE , P_CONTAINER , D_YEAR , D_YEARMONTHNUM , D_WEEKNUMINYEAR , } => C_PHONE , } } # [doc = " Returns a borrow of the field C_MKTSEGMENT"] pub fn C_MKTSEGMENT (& self) -> & Sequence < DafnyChar > { match self { Row :: Row { LO_ORDERKEY , LO_LINENUMBER , LO_CUSTKEY , LO_PARTKEY , LO_SUPPKEY , LO_ORDERDATE , LO_ORDERPRIORITY , LO_SHIPPRIORITY , LO_QUANTITY , LO_EXTENDEDPRICE , LO_ORDTOTALPRICE , LO_DISCOUNT , LO_REVENUE , LO_SUPPLYCOST , LO_TAX , LO_COMMITDATE , LO_SHIPMODE , C_NAME , C_ADDRESS , C_CITY , C_NATION , C_REGION , C_PHONE , C_MKTSEGMENT , S_NAME , S_ADDRESS , S_CITY , S_NATION , S_REGION , S_PHONE , P_NAME , P_MFGR , P_CATEGORY , P_BRAND , P_COLOR , P_TYPE , P_SIZE , P_CONTAINER , D_YEAR , D_YEARMONTHNUM , D_WEEKNUMINYEAR , } => C_MKTSEGMENT , } } # [doc = " Returns a borrow of the field S_NAME"] pub fn S_NAME (& self) -> & Sequence < DafnyChar > { match self { Row :: Row { LO_ORDERKEY , LO_LINENUMBER , LO_CUSTKEY , LO_PARTKEY , LO_SUPPKEY , LO_ORDERDATE , LO_ORDERPRIORITY , LO_SHIPPRIORITY , LO_QUANTITY , LO_EXTENDEDPRICE , LO_ORDTOTALPRICE , LO_DISCOUNT , LO_REVENUE , LO_SUPPLYCOST , LO_TAX , LO_COMMITDATE , LO_SHIPMODE , C_NAME , C_ADDRESS , C_CITY , C_NATION , C_REGION , C_PHONE , C_MKTSEGMENT , S_NAME , S_ADDRESS , S_CITY , S_NATION , S_REGION , S_PHONE , P_NAME , P_MFGR , P_CATEGORY , P_BRAND , P_COLOR , P_TYPE , P_SIZE , P_CONTAINER , D_YEAR , D_YEARMONTHNUM , D_WEEKNUMINYEAR , } => S_NAME , } } # [doc = " Returns a borrow of the field S_ADDRESS"] pub fn S_ADDRESS (& self) -> & Sequence < DafnyChar > { match self { Row :: Row { LO_ORDERKEY , LO_LINENUMBER , LO_CUSTKEY , LO_PARTKEY , LO_SUPPKEY , LO_ORDERDATE , LO_ORDERPRIORITY , LO_SHIPPRIORITY , LO_QUANTITY , LO_EXTENDEDPRICE , LO_ORDTOTALPRICE , LO_DISCOUNT , LO_REVENUE , LO_SUPPLYCOST , LO_TAX , LO_COMMITDATE , LO_SHIPMODE , C_NAME , C_ADDRESS , C_CITY , C_NATION , C_REGION , C_PHONE , C_MKTSEGMENT , S_NAME , S_ADDRESS , S_CITY , S_NATION , S_REGION , S_PHONE , P_NAME , P_MFGR , P_CATEGORY , P_BRAND , P_COLOR , P_TYPE , P_SIZE , P_CONTAINER , D_YEAR , D_YEARMONTHNUM , D_WEEKNUMINYEAR , } => S_ADDRESS , } } # [doc = " Returns a borrow of the field S_CITY"] pub fn S_CITY (& self) -> & Sequence < DafnyChar > { match self { Row :: Row { LO_ORDERKEY , LO_LINENUMBER , LO_CUSTKEY , LO_PARTKEY , LO_SUPPKEY , LO_ORDERDATE , LO_ORDERPRIORITY , LO_SHIPPRIORITY , LO_QUANTITY , LO_EXTENDEDPRICE , LO_ORDTOTALPRICE , LO_DISCOUNT , LO_REVENUE , LO_SUPPLYCOST , LO_TAX , LO_COMMITDATE , LO_SHIPMODE , C_NAME , C_ADDRESS , C_CITY , C_NATION , C_REGION , C_PHONE , C_MKTSEGMENT , S_NAME , S_ADDRESS , S_CITY , S_NATION , S_REGION , S_PHONE , P_NAME , P_MFGR , P_CATEGORY , P_BRAND , P_COLOR , P_TYPE , P_SIZE , P_CONTAINER , D_YEAR , D_YEARMONTHNUM , D_WEEKNUMINYEAR , } => S_CITY , } } # [doc = " Returns a borrow of the field S_NATION"] pub fn S_NATION (& self) -> & Sequence < DafnyChar > { match self { Row :: Row { LO_ORDERKEY , LO_LINENUMBER , LO_CUSTKEY , LO_PARTKEY , LO_SUPPKEY , LO_ORDERDATE , LO_ORDERPRIORITY , LO_SHIPPRIORITY , LO_QUANTITY , LO_EXTENDEDPRICE , LO_ORDTOTALPRICE , LO_DISCOUNT , LO_REVENUE , LO_SUPPLYCOST , LO_TAX , LO_COMMITDATE , LO_SHIPMODE , C_NAME , C_ADDRESS , C_CITY , C_NATION , C_REGION , C_PHONE , C_MKTSEGMENT , S_NAME , S_ADDRESS , S_CITY , S_NATION , S_REGION , S_PHONE , P_NAME , P_MFGR , P_CATEGORY , P_BRAND , P_COLOR , P_TYPE , P_SIZE , P_CONTAINER , D_YEAR , D_YEARMONTHNUM , D_WEEKNUMINYEAR , } => S_NATION , } } # [doc = " Returns a borrow of the field S_REGION"] pub fn S_REGION (& self) -> & Sequence < DafnyChar > { match self { Row :: Row { LO_ORDERKEY , LO_LINENUMBER , LO_CUSTKEY , LO_PARTKEY , LO_SUPPKEY , LO_ORDERDATE , LO_ORDERPRIORITY , LO_SHIPPRIORITY , LO_QUANTITY , LO_EXTENDEDPRICE , LO_ORDTOTALPRICE , LO_DISCOUNT , LO_REVENUE , LO_SUPPLYCOST , LO_TAX , LO_COMMITDATE , LO_SHIPMODE , C_NAME , C_ADDRESS , C_CITY , C_NATION , C_REGION , C_PHONE , C_MKTSEGMENT , S_NAME , S_ADDRESS , S_CITY , S_NATION , S_REGION , S_PHONE , P_NAME , P_MFGR , P_CATEGORY , P_BRAND , P_COLOR , P_TYPE , P_SIZE , P_CONTAINER , D_YEAR , D_YEARMONTHNUM , D_WEEKNUMINYEAR , } => S_REGION , } } # [doc = " Returns a borrow of the field S_PHONE"] pub fn S_PHONE (& self) -> & Sequence < DafnyChar > { match self { Row :: Row { LO_ORDERKEY , LO_LINENUMBER , LO_CUSTKEY , LO_PARTKEY , LO_SUPPKEY , LO_ORDERDATE , LO_ORDERPRIORITY , LO_SHIPPRIORITY , LO_QUANTITY , LO_EXTENDEDPRICE , LO_ORDTOTALPRICE , LO_DISCOUNT , LO_REVENUE , LO_SUPPLYCOST , LO_TAX , LO_COMMITDATE , LO_SHIPMODE , C_NAME , C_ADDRESS , C_CITY , C_NATION , C_REGION , C_PHONE , C_MKTSEGMENT , S_NAME , S_ADDRESS , S_CITY , S_NATION , S_REGION , S_PHONE , P_NAME , P_MFGR , P_CATEGORY , P_BRAND , P_COLOR , P_TYPE , P_SIZE , P_CONTAINER , D_YEAR , D_YEARMONTHNUM , D_WEEKNUMINYEAR , } => S_PHONE , } } # [doc = " Returns a borrow of the field P_NAME"] pub fn P_NAME (& self) -> & Sequence < DafnyChar > { match self { Row :: Row { LO_ORDERKEY , LO_LINENUMBER , LO_CUSTKEY , LO_PARTKEY , LO_SUPPKEY , LO_ORDERDATE , LO_ORDERPRIORITY , LO_SHIPPRIORITY , LO_QUANTITY , LO_EXTENDEDPRICE , LO_ORDTOTALPRICE , LO_DISCOUNT , LO_REVENUE , LO_SUPPLYCOST , LO_TAX , LO_COMMITDATE , LO_SHIPMODE , C_NAME , C_ADDRESS , C_CITY , C_NATION , C_REGION , C_PHONE , C_MKTSEGMENT , S_NAME , S_ADDRESS , S_CITY , S_NATION , S_REGION , S_PHONE , P_NAME , P_MFGR , P_CATEGORY , P_BRAND , P_COLOR , P_TYPE , P_SIZE , P_CONTAINER , D_YEAR , D_YEARMONTHNUM , D_WEEKNUMINYEAR , } => P_NAME , } } # [doc = " Returns a borrow of the field P_MFGR"] pub fn P_MFGR (& self) -> & Sequence < DafnyChar > { match self { Row :: Row { LO_ORDERKEY , LO_LINENUMBER , LO_CUSTKEY , LO_PARTKEY , LO_SUPPKEY , LO_ORDERDATE , LO_ORDERPRIORITY , LO_SHIPPRIORITY , LO_QUANTITY , LO_EXTENDEDPRICE , LO_ORDTOTALPRICE , LO_DISCOUNT , LO_REVENUE , LO_SUPPLYCOST , LO_TAX , LO_COMMITDATE , LO_SHIPMODE , C_NAME , C_ADDRESS , C_CITY , C_NATION , C_REGION , C_PHONE , C_MKTSEGMENT , S_NAME , S_ADDRESS , S_CITY , S_NATION , S_REGION , S_PHONE , P_NAME , P_MFGR , P_CATEGORY , P_BRAND , P_COLOR , P_TYPE , P_SIZE , P_CONTAINER , D_YEAR , D_YEARMONTHNUM , D_WEEKNUMINYEAR , } => P_MFGR , } } # [doc = " Returns a borrow of the field P_CATEGORY"] pub fn P_CATEGORY (& self) -> & Sequence < DafnyChar > { match self { Row :: Row { LO_ORDERKEY , LO_LINENUMBER , LO_CUSTKEY , LO_PARTKEY , LO_SUPPKEY , LO_ORDERDATE , LO_ORDERPRIORITY , LO_SHIPPRIORITY , LO_QUANTITY , LO_EXTENDEDPRICE , LO_ORDTOTALPRICE , LO_DISCOUNT , LO_REVENUE , LO_SUPPLYCOST , LO_TAX , LO_COMMITDATE , LO_SHIPMODE , C_NAME , C_ADDRESS , C_CITY , C_NATION , C_REGION , C_PHONE , C_MKTSEGMENT , S_NAME , S_ADDRESS , S_CITY , S_NATION , S_REGION , S_PHONE , P_NAME , P_MFGR , P_CATEGORY , P_BRAND , P_COLOR , P_TYPE , P_SIZE , P_CONTAINER , D_YEAR , D_YEARMONTHNUM , D_WEEKNUMINYEAR , } => P_CATEGORY , } } # [doc = " Returns a borrow of the field P_BRAND"] pub fn P_BRAND (& self) -> & Sequence < DafnyChar > { match self { Row :: Row { LO_ORDERKEY , LO_LINENUMBER , LO_CUSTKEY , LO_PARTKEY , LO_SUPPKEY , LO_ORDERDATE , LO_ORDERPRIORITY , LO_SHIPPRIORITY , LO_QUANTITY , LO_EXTENDEDPRICE , LO_ORDTOTALPRICE , LO_DISCOUNT , LO_REVENUE , LO_SUPPLYCOST , LO_TAX , LO_COMMITDATE , LO_SHIPMODE , C_NAME , C_ADDRESS , C_CITY , C_NATION , C_REGION , C_PHONE , C_MKTSEGMENT , S_NAME , S_ADDRESS , S_CITY , S_NATION , S_REGION , S_PHONE , P_NAME , P_MFGR , P_CATEGORY , P_BRAND , P_COLOR , P_TYPE , P_SIZE , P_CONTAINER , D_YEAR , D_YEARMONTHNUM , D_WEEKNUMINYEAR , } => P_BRAND , } } # [doc = " Returns a borrow of the field P_COLOR"] pub fn P_COLOR (& self) -> & Sequence < DafnyChar > { match self { Row :: Row { LO_ORDERKEY , LO_LINENUMBER , LO_CUSTKEY , LO_PARTKEY , LO_SUPPKEY , LO_ORDERDATE , LO_ORDERPRIORITY , LO_SHIPPRIORITY , LO_QUANTITY , LO_EXTENDEDPRICE , LO_ORDTOTALPRICE , LO_DISCOUNT , LO_REVENUE , LO_SUPPLYCOST , LO_TAX , LO_COMMITDATE , LO_SHIPMODE , C_NAME , C_ADDRESS , C_CITY , C_NATION , C_REGION , C_PHONE , C_MKTSEGMENT , S_NAME , S_ADDRESS , S_CITY , S_NATION , S_REGION , S_PHONE , P_NAME , P_MFGR , P_CATEGORY , P_BRAND , P_COLOR , P_TYPE , P_SIZE , P_CONTAINER , D_YEAR , D_YEARMONTHNUM , D_WEEKNUMINYEAR , } => P_COLOR , } } # [doc = " Returns a borrow of the field P_TYPE"] pub fn P_TYPE (& self) -> & Sequence < DafnyChar > { match self { Row :: Row { LO_ORDERKEY , LO_LINENUMBER , LO_CUSTKEY , LO_PARTKEY , LO_SUPPKEY , LO_ORDERDATE , LO_ORDERPRIORITY , LO_SHIPPRIORITY , LO_QUANTITY , LO_EXTENDEDPRICE , LO_ORDTOTALPRICE , LO_DISCOUNT , LO_REVENUE , LO_SUPPLYCOST , LO_TAX , LO_COMMITDATE , LO_SHIPMODE , C_NAME , C_ADDRESS , C_CITY , C_NATION , C_REGION , C_PHONE , C_MKTSEGMENT , S_NAME , S_ADDRESS , S_CITY , S_NATION , S_REGION , S_PHONE , P_NAME , P_MFGR , P_CATEGORY , P_BRAND , P_COLOR , P_TYPE , P_SIZE , P_CONTAINER , D_YEAR , D_YEARMONTHNUM , D_WEEKNUMINYEAR , } => P_TYPE , } } # [doc = " Returns a borrow of the field P_SIZE"] pub fn P_SIZE (& self) -> & u32 { match self { Row :: Row { LO_ORDERKEY , LO_LINENUMBER , LO_CUSTKEY , LO_PARTKEY , LO_SUPPKEY , LO_ORDERDATE , LO_ORDERPRIORITY , LO_SHIPPRIORITY , LO_QUANTITY , LO_EXTENDEDPRICE , LO_ORDTOTALPRICE , LO_DISCOUNT , LO_REVENUE , LO_SUPPLYCOST , LO_TAX , LO_COMMITDATE , LO_SHIPMODE , C_NAME , C_ADDRESS , C_CITY , C_NATION , C_REGION , C_PHONE , C_MKTSEGMENT , S_NAME , S_ADDRESS , S_CITY , S_NATION , S_REGION , S_PHONE , P_NAME , P_MFGR , P_CATEGORY , P_BRAND , P_COLOR , P_TYPE , P_SIZE , P_CONTAINER , D_YEAR , D_YEARMONTHNUM , D_WEEKNUMINYEAR , } => P_SIZE , } } # [doc = " Returns a borrow of the field P_CONTAINER"] pub fn P_CONTAINER (& self) -> & Sequence < DafnyChar > { match self { Row :: Row { LO_ORDERKEY , LO_LINENUMBER , LO_CUSTKEY , LO_PARTKEY , LO_SUPPKEY , LO_ORDERDATE , LO_ORDERPRIORITY , LO_SHIPPRIORITY , LO_QUANTITY , LO_EXTENDEDPRICE , LO_ORDTOTALPRICE , LO_DISCOUNT , LO_REVENUE , LO_SUPPLYCOST , LO_TAX , LO_COMMITDATE , LO_SHIPMODE , C_NAME , C_ADDRESS , C_CITY , C_NATION , C_REGION , C_PHONE , C_MKTSEGMENT , S_NAME , S_ADDRESS , S_CITY , S_NATION , S_REGION , S_PHONE , P_NAME , P_MFGR , P_CATEGORY , P_BRAND , P_COLOR , P_TYPE , P_SIZE , P_CONTAINER , D_YEAR , D_YEARMONTHNUM , D_WEEKNUMINYEAR , } => P_CONTAINER , } } # [doc = " Returns a borrow of the field D_YEAR"] pub fn D_YEAR (& self) -> & u32 { match self { Row :: Row { LO_ORDERKEY , LO_LINENUMBER , LO_CUSTKEY , LO_PARTKEY , LO_SUPPKEY , LO_ORDERDATE , LO_ORDERPRIORITY , LO_SHIPPRIORITY , LO_QUANTITY , LO_EXTENDEDPRICE , LO_ORDTOTALPRICE , LO_DISCOUNT , LO_REVENUE , LO_SUPPLYCOST , LO_TAX , LO_COMMITDATE , LO_SHIPMODE , C_NAME , C_ADDRESS , C_CITY , C_NATION , C_REGION , C_PHONE , C_MKTSEGMENT , S_NAME , S_ADDRESS , S_CITY , S_NATION , S_REGION , S_PHONE , P_NAME , P_MFGR , P_CATEGORY , P_BRAND , P_COLOR , P_TYPE , P_SIZE , P_CONTAINER , D_YEAR , D_YEARMONTHNUM , D_WEEKNUMINYEAR , } => D_YEAR , } } # [doc = " Returns a borrow of the field D_YEARMONTHNUM"] pub fn D_YEARMONTHNUM (& self) -> & u32 { match self { Row :: Row { LO_ORDERKEY , LO_LINENUMBER , LO_CUSTKEY , LO_PARTKEY , LO_SUPPKEY , LO_ORDERDATE , LO_ORDERPRIORITY , LO_SHIPPRIORITY , LO_QUANTITY , LO_EXTENDEDPRICE , LO_ORDTOTALPRICE , LO_DISCOUNT , LO_REVENUE , LO_SUPPLYCOST , LO_TAX , LO_COMMITDATE , LO_SHIPMODE , C_NAME , C_ADDRESS , C_CITY , C_NATION , C_REGION , C_PHONE , C_MKTSEGMENT , S_NAME , S_ADDRESS , S_CITY , S_NATION , S_REGION , S_PHONE , P_NAME , P_MFGR , P_CATEGORY , P_BRAND , P_COLOR , P_TYPE , P_SIZE , P_CONTAINER , D_YEAR , D_YEARMONTHNUM , D_WEEKNUMINYEAR , } => D_YEARMONTHNUM , } } # [doc = " Returns a borrow of the field D_WEEKNUMINYEAR"] pub fn D_WEEKNUMINYEAR (& self) -> & u32 { match self { Row :: Row { LO_ORDERKEY , LO_LINENUMBER , LO_CUSTKEY , LO_PARTKEY , LO_SUPPKEY , LO_ORDERDATE , LO_ORDERPRIORITY , LO_SHIPPRIORITY , LO_QUANTITY , LO_EXTENDEDPRICE , LO_ORDTOTALPRICE , LO_DISCOUNT , LO_REVENUE , LO_SUPPLYCOST , LO_TAX , LO_COMMITDATE , LO_SHIPMODE , C_NAME , C_ADDRESS , C_CITY , C_NATION , C_REGION , C_PHONE , C_MKTSEGMENT , S_NAME , S_ADDRESS , S_CITY , S_NATION , S_REGION , S_PHONE , P_NAME , P_MFGR , P_CATEGORY , P_BRAND , P_COLOR , P_TYPE , P_SIZE , P_CONTAINER , D_YEAR , D_YEARMONTHNUM , D_WEEKNUMINYEAR , } => D_WEEKNUMINYEAR , } } } impl Debug for Row { fn fmt (& self , f : & mut Formatter) -> Result { DafnyPrint :: fmt_print (self , f , true) } } impl DafnyPrint for Row { fn fmt_print (& self , _formatter : & mut Formatter , _in_seq : bool) -> std :: fmt :: Result { match self { Row :: Row { LO_ORDERKEY , LO_LINENUMBER , LO_CUSTKEY , LO_PARTKEY , LO_SUPPKEY , LO_ORDERDATE , LO_ORDERPRIORITY , LO_SHIPPRIORITY , LO_QUANTITY , LO_EXTENDEDPRICE , LO_ORDTOTALPRICE , LO_DISCOUNT , LO_REVENUE , LO_SUPPLYCOST , LO_TAX , LO_COMMITDATE , LO_SHIPMODE , C_NAME , C_ADDRESS , C_CITY , C_NATION , C_REGION , C_PHONE , C_MKTSEGMENT , S_NAME , S_ADDRESS , S_CITY , S_NATION , S_REGION , S_PHONE , P_NAME , P_MFGR , P_CATEGORY , P_BRAND , P_COLOR , P_TYPE , P_SIZE , P_CONTAINER , D_YEAR , D_YEARMONTHNUM , D_WEEKNUMINYEAR , } => { write ! (_formatter , "Row.Row(") ? ; DafnyPrint :: fmt_print (LO_ORDERKEY , _formatter , false) ? ; write ! (_formatter , ", ") ? ; DafnyPrint :: fmt_print (LO_LINENUMBER , _formatter , false) ? ; write ! (_formatter , ", ") ? ; DafnyPrint :: fmt_print (LO_CUSTKEY , _formatter , false) ? ; write ! (_formatter , ", ") ? ; DafnyPrint :: fmt_print (LO_PARTKEY , _formatter , false) ? ; write ! (_formatter , ", ") ? ; DafnyPrint :: fmt_print (LO_SUPPKEY , _formatter , false) ? ; write ! (_formatter , ", ") ? ; DafnyPrint :: fmt_print (LO_ORDERDATE , _formatter , false) ? ; write ! (_formatter , ", ") ? ; DafnyPrint :: fmt_print (LO_ORDERPRIORITY , _formatter , false) ? ; write ! (_formatter , ", ") ? ; DafnyPrint :: fmt_print (LO_SHIPPRIORITY , _formatter , false) ? ; write ! (_formatter , ", ") ? ; DafnyPrint :: fmt_print (LO_QUANTITY , _formatter , false) ? ; write ! (_formatter , ", ") ? ; DafnyPrint :: fmt_print (LO_EXTENDEDPRICE , _formatter , false) ? ; write ! (_formatter , ", ") ? ; DafnyPrint :: fmt_print (LO_ORDTOTALPRICE , _formatter , false) ? ; write ! (_formatter , ", ") ? ; DafnyPrint :: fmt_print (LO_DISCOUNT , _formatter , false) ? ; write ! (_formatter , ", ") ? ; DafnyPrint :: fmt_print (LO_REVENUE , _formatter , false) ? ; write ! (_formatter , ", ") ? ; DafnyPrint :: fmt_print (LO_SUPPLYCOST , _formatter , false) ? ; write ! (_formatter , ", ") ? ; DafnyPrint :: fmt_print (LO_TAX , _formatter , false) ? ; write ! (_formatter , ", ") ? ; DafnyPrint :: fmt_print (LO_COMMITDATE , _formatter , false) ? ; write ! (_formatter , ", ") ? ; DafnyPrint :: fmt_print (LO_SHIPMODE , _formatter , false) ? ; write ! (_formatter , ", ") ? ; DafnyPrint :: fmt_print (C_NAME , _formatter , false) ? ; write ! (_formatter , ", ") ? ; DafnyPrint :: fmt_print (C_ADDRESS , _formatter , false) ? ; write ! (_formatter , ", ") ? ; DafnyPrint :: fmt_print (C_CITY , _formatter , false) ? ; write ! (_formatter , ", ") ? ; DafnyPrint :: fmt_print (C_NATION , _formatter , false) ? ; write ! (_formatter , ", ") ? ; DafnyPrint :: fmt_print (C_REGION , _formatter , false) ? ; write ! (_formatter , ", ") ? ; DafnyPrint :: fmt_print (C_PHONE , _formatter , false) ? ; write ! (_formatter , ", ") ? ; DafnyPrint :: fmt_print (C_MKTSEGMENT , _formatter , false) ? ; write ! (_formatter , ", ") ? ; DafnyPrint :: fmt_print (S_NAME , _formatter , false) ? ; write ! (_formatter , ", ") ? ; DafnyPrint :: fmt_print (S_ADDRESS , _formatter , false) ? ; write ! (_formatter , ", ") ? ; DafnyPrint :: fmt_print (S_CITY , _formatter , false) ? ; write ! (_formatter , ", ") ? ; DafnyPrint :: fmt_print (S_NATION , _formatter , false) ? ; write ! (_formatter , ", ") ? ; DafnyPrint :: fmt_print (S_REGION , _formatter , false) ? ; write ! (_formatter , ", ") ? ; DafnyPrint :: fmt_print (S_PHONE , _formatter , false) ? ; write ! (_formatter , ", ") ? ; DafnyPrint :: fmt_print (P_NAME , _formatter , false) ? ; write ! (_formatter , ", ") ? ; DafnyPrint :: fmt_print (P_MFGR , _formatter , false) ? ; write ! (_formatter , ", ") ? ; DafnyPrint :: fmt_print (P_CATEGORY , _formatter , false) ? ; write ! (_formatter , ", ") ? ; DafnyPrint :: fmt_print (P_BRAND , _formatter , false) ? ; write ! (_formatter , ", ") ? ; DafnyPrint :: fmt_print (P_COLOR , _formatter , false) ? ; write ! (_formatter , ", ") ? ; DafnyPrint :: fmt_print (P_TYPE , _formatter , false) ? ; write ! (_formatter , ", ") ? ; DafnyPrint :: fmt_print (P_SIZE , _formatter , false) ? ; write ! (_formatter , ", ") ? ; DafnyPrint :: fmt_print (P_CONTAINER , _formatter , false) ? ; write ! (_formatter , ", ") ? ; DafnyPrint :: fmt_print (D_YEAR , _formatter , false) ? ; write ! (_formatter , ", ") ? ; DafnyPrint :: fmt_print (D_YEARMONTHNUM , _formatter , false) ? ; write ! (_formatter , ", ") ? ; DafnyPrint :: fmt_print (D_WEEKNUMINYEAR , _formatter , false) ? ; write ! (_formatter , ")") ? ; Ok (()) } , } } } impl PartialEq for Row { fn eq (& self , other : & Self) -> bool { match (self , other) { (Row :: Row { LO_ORDERKEY , LO_LINENUMBER , LO_CUSTKEY , LO_PARTKEY , LO_SUPPKEY , LO_ORDERDATE , LO_ORDERPRIORITY , LO_SHIPPRIORITY , LO_QUANTITY , LO_EXTENDEDPRICE , LO_ORDTOTALPRICE , LO_DISCOUNT , LO_REVENUE , LO_SUPPLYCOST , LO_TAX , LO_COMMITDATE , LO_SHIPMODE , C_NAME , C_ADDRESS , C_CITY , C_NATION , C_REGION , C_PHONE , C_MKTSEGMENT , S_NAME , S_ADDRESS , S_CITY , S_NATION , S_REGION , S_PHONE , P_NAME , P_MFGR , P_CATEGORY , P_BRAND , P_COLOR , P_TYPE , P_SIZE , P_CONTAINER , D_YEAR , D_YEARMONTHNUM , D_WEEKNUMINYEAR , } , Row :: Row { LO_ORDERKEY : _2_LO_ORDERKEY , LO_LINENUMBER : _2_LO_LINENUMBER , LO_CUSTKEY : _2_LO_CUSTKEY , LO_PARTKEY : _2_LO_PARTKEY , LO_SUPPKEY : _2_LO_SUPPKEY , LO_ORDERDATE : _2_LO_ORDERDATE , LO_ORDERPRIORITY : _2_LO_ORDERPRIORITY , LO_SHIPPRIORITY : _2_LO_SHIPPRIORITY , LO_QUANTITY : _2_LO_QUANTITY , LO_EXTENDEDPRICE : _2_LO_EXTENDEDPRICE , LO_ORDTOTALPRICE : _2_LO_ORDTOTALPRICE , LO_DISCOUNT : _2_LO_DISCOUNT , LO_REVENUE : _2_LO_REVENUE , LO_SUPPLYCOST : _2_LO_SUPPLYCOST , LO_TAX : _2_LO_TAX , LO_COMMITDATE : _2_LO_COMMITDATE , LO_SHIPMODE : _2_LO_SHIPMODE , C_NAME : _2_C_NAME , C_ADDRESS : _2_C_ADDRESS , C_CITY : _2_C_CITY , C_NATION : _2_C_NATION , C_REGION : _2_C_REGION , C_PHONE : _2_C_PHONE , C_MKTSEGMENT : _2_C_MKTSEGMENT , S_NAME : _2_S_NAME , S_ADDRESS : _2_S_ADDRESS , S_CITY : _2_S_CITY , S_NATION : _2_S_NATION , S_REGION : _2_S_REGION , S_PHONE : _2_S_PHONE , P_NAME : _2_P_NAME , P_MFGR : _2_P_MFGR , P_CATEGORY : _2_P_CATEGORY , P_BRAND : _2_P_BRAND , P_COLOR : _2_P_COLOR , P_TYPE : _2_P_TYPE , P_SIZE : _2_P_SIZE , P_CONTAINER : _2_P_CONTAINER , D_YEAR : _2_D_YEAR , D_YEARMONTHNUM : _2_D_YEARMONTHNUM , D_WEEKNUMINYEAR : _2_D_WEEKNUMINYEAR , }) => { LO_ORDERKEY == _2_LO_ORDERKEY && LO_LINENUMBER == _2_LO_LINENUMBER && LO_CUSTKEY == _2_LO_CUSTKEY && LO_PARTKEY == _2_LO_PARTKEY && LO_SUPPKEY == _2_LO_SUPPKEY && LO_ORDERDATE == _2_LO_ORDERDATE && LO_ORDERPRIORITY == _2_LO_ORDERPRIORITY && LO_SHIPPRIORITY == _2_LO_SHIPPRIORITY && LO_QUANTITY == _2_LO_QUANTITY && LO_EXTENDEDPRICE == _2_LO_EXTENDEDPRICE && LO_ORDTOTALPRICE == _2_LO_ORDTOTALPRICE && LO_DISCOUNT == _2_LO_DISCOUNT && LO_REVENUE == _2_LO_REVENUE && LO_SUPPLYCOST == _2_LO_SUPPLYCOST && LO_TAX == _2_LO_TAX && LO_COMMITDATE == _2_LO_COMMITDATE && LO_SHIPMODE == _2_LO_SHIPMODE && C_NAME == _2_C_NAME && C_ADDRESS == _2_C_ADDRESS && C_CITY == _2_C_CITY && C_NATION == _2_C_NATION && C_REGION == _2_C_REGION && C_PHONE == _2_C_PHONE && C_MKTSEGMENT == _2_C_MKTSEGMENT && S_NAME == _2_S_NAME && S_ADDRESS == _2_S_ADDRESS && S_CITY == _2_S_CITY && S_NATION == _2_S_NATION && S_REGION == _2_S_REGION && S_PHONE == _2_S_PHONE && P_NAME == _2_P_NAME && P_MFGR == _2_P_MFGR && P_CATEGORY == _2_P_CATEGORY && P_BRAND == _2_P_BRAND && P_COLOR == _2_P_COLOR && P_TYPE == _2_P_TYPE && P_SIZE == _2_P_SIZE && P_CONTAINER == _2_P_CONTAINER && D_YEAR == _2_D_YEAR && D_YEARMONTHNUM == _2_D_YEARMONTHNUM && D_WEEKNUMINYEAR == _2_D_WEEKNUMINYEAR } , _ => { false } , } } } impl Eq for Row { } impl Hash for Row { fn hash < _H : Hasher > (& self , _state : & mut _H) { match self { Row :: Row { LO_ORDERKEY , LO_LINENUMBER , LO_CUSTKEY , LO_PARTKEY , LO_SUPPKEY , LO_ORDERDATE , LO_ORDERPRIORITY , LO_SHIPPRIORITY , LO_QUANTITY , LO_EXTENDEDPRICE , LO_ORDTOTALPRICE , LO_DISCOUNT , LO_REVENUE , LO_SUPPLYCOST , LO_TAX , LO_COMMITDATE , LO_SHIPMODE , C_NAME , C_ADDRESS , C_CITY , C_NATION , C_REGION , C_PHONE , C_MKTSEGMENT , S_NAME , S_ADDRESS , S_CITY , S_NATION , S_REGION , S_PHONE , P_NAME , P_MFGR , P_CATEGORY , P_BRAND , P_COLOR , P_TYPE , P_SIZE , P_CONTAINER , D_YEAR , D_YEARMONTHNUM , D_WEEKNUMINYEAR , } => { Hash :: hash (LO_ORDERKEY , _state) ; Hash :: hash (LO_LINENUMBER , _state) ; Hash :: hash (LO_CUSTKEY , _state) ; Hash :: hash (LO_PARTKEY , _state) ; Hash :: hash (LO_SUPPKEY , _state) ; Hash :: hash (LO_ORDERDATE , _state) ; Hash :: hash (LO_ORDERPRIORITY , _state) ; Hash :: hash (LO_SHIPPRIORITY , _state) ; Hash :: hash (LO_QUANTITY , _state) ; Hash :: hash (LO_EXTENDEDPRICE , _state) ; Hash :: hash (LO_ORDTOTALPRICE , _state) ; Hash :: hash (LO_DISCOUNT , _state) ; Hash :: hash (LO_REVENUE , _state) ; Hash :: hash (LO_SUPPLYCOST , _state) ; Hash :: hash (LO_TAX , _state) ; Hash :: hash (LO_COMMITDATE , _state) ; Hash :: hash (LO_SHIPMODE , _state) ; Hash :: hash (C_NAME , _state) ; Hash :: hash (C_ADDRESS , _state) ; Hash :: hash (C_CITY , _state) ; Hash :: hash (C_NATION , _state) ; Hash :: hash (C_REGION , _state) ; Hash :: hash (C_PHONE , _state) ; Hash :: hash (C_MKTSEGMENT , _state) ; Hash :: hash (S_NAME , _state) ; Hash :: hash (S_ADDRESS , _state) ; Hash :: hash (S_CITY , _state) ; Hash :: hash (S_NATION , _state) ; Hash :: hash (S_REGION , _state) ; Hash :: hash (S_PHONE , _state) ; Hash :: hash (P_NAME , _state) ; Hash :: hash (P_MFGR , _state) ; Hash :: hash (P_CATEGORY , _state) ; Hash :: hash (P_BRAND , _state) ; Hash :: hash (P_COLOR , _state) ; Hash :: hash (P_TYPE , _state) ; Hash :: hash (P_SIZE , _state) ; Hash :: hash (P_CONTAINER , _state) ; Hash :: hash (D_YEAR , _state) ; Hash :: hash (D_YEARMONTHNUM , _state) ; Hash :: hash (D_WEEKNUMINYEAR , _state) } , } } } impl AsRef < Row > for Row { fn as_ref (& self) -> & Self { self } } } fn main () { let args : Vec < String > = :: std :: env :: args () . collect () ; let dafny_args = :: dafny_runtime :: dafny_runtime_conversions :: vec_to_dafny_sequence (& args , | s | :: dafny_runtime :: dafny_runtime_conversions :: unicode_chars_true :: string_to_dafny_string (s)) ; crate :: _module :: _default :: Main (& dafny_args) ; }
+
+    impl Add
+        for _u32 {
+        type Output = _u32;
+        fn add(self, other: Self) -> Self {
+            _u32(self.0 + other.0)
+        }
+    }
+
+    impl Sub
+        for _u32 {
+        type Output = _u32;
+        fn sub(self, other: Self) -> Self {
+            _u32(self.0 - other.0)
+        }
+    }
+
+    impl Mul
+        for _u32 {
+        type Output = _u32;
+        fn mul(self, other: Self) -> Self {
+            _u32(self.0 * other.0)
+        }
+    }
+
+    impl Div
+        for _u32 {
+        type Output = _u32;
+        fn div(self, other: Self) -> Self {
+            _u32(self.0 / other.0)
+        }
+    }
+
+    impl PartialOrd
+        for _u32 {
+        fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+            PartialOrd::partial_cmp(&self.0, &other.0)
+        }
+    }
+
+    /// working_query.dfy(5,1)
+    #[derive(Clone, Copy)]
+    #[repr(transparent)]
+    pub struct _u64(pub u64);
+
+    impl PartialEq
+        for _u64 {
+        fn eq(&self, other: &Self) -> bool {
+            self.0 == other.0
+        }
+    }
+
+    impl Eq
+        for _u64 {}
+
+    impl Hash
+        for _u64 {
+        fn hash<_H: Hasher>(&self, _state: &mut _H) {
+            Hash::hash(&self.0, _state)
+        }
+    }
+
+    impl _u64 {
+        /// Constraint check
+        pub fn is(_source: u64) -> bool {
+            return true;
+        }
+    }
+
+    impl Default
+        for _u64 {
+        /// An element of _u64
+        fn default() -> Self {
+            _u64(Default::default())
+        }
+    }
+
+    impl DafnyPrint
+        for _u64 {
+        /// For Dafny print statements
+        fn fmt_print(&self, _formatter: &mut Formatter, in_seq: bool) -> Result {
+            DafnyPrint::fmt_print(&self.0, _formatter, in_seq)
+        }
+    }
+
+    impl Deref
+        for _u64 {
+        type Target = u64;
+        fn deref(&self) -> &Self::Target {
+            &self.0
+        }
+    }
+
+    impl _u64 {
+        /// SAFETY: The newtype is marked as transparent
+        pub fn _from_ref(o: &u64) -> &Self {
+            unsafe {
+                transmute(o)
+            }
+        }
+    }
+
+    impl Add
+        for _u64 {
+        type Output = _u64;
+        fn add(self, other: Self) -> Self {
+            _u64(self.0 + other.0)
+        }
+    }
+
+    impl Sub
+        for _u64 {
+        type Output = _u64;
+        fn sub(self, other: Self) -> Self {
+            _u64(self.0 - other.0)
+        }
+    }
+
+    impl Mul
+        for _u64 {
+        type Output = _u64;
+        fn mul(self, other: Self) -> Self {
+            _u64(self.0 * other.0)
+        }
+    }
+
+    impl Div
+        for _u64 {
+        type Output = _u64;
+        fn div(self, other: Self) -> Self {
+            _u64(self.0 / other.0)
+        }
+    }
+
+    impl PartialOrd
+        for _u64 {
+        fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+            PartialOrd::partial_cmp(&self.0, &other.0)
+        }
+    }
+
+    /// working_query.dfy(6,1)
+    #[derive(Clone, Copy)]
+    #[repr(transparent)]
+    pub struct _i64(pub i64);
+
+    impl PartialEq
+        for _i64 {
+        fn eq(&self, other: &Self) -> bool {
+            self.0 == other.0
+        }
+    }
+
+    impl Eq
+        for _i64 {}
+
+    impl Hash
+        for _i64 {
+        fn hash<_H: Hasher>(&self, _state: &mut _H) {
+            Hash::hash(&self.0, _state)
+        }
+    }
+
+    impl _i64 {
+        /// Constraint check
+        pub fn is(_source: i64) -> bool {
+            return true;
+        }
+    }
+
+    impl Default
+        for _i64 {
+        /// An element of _i64
+        fn default() -> Self {
+            _i64(Default::default())
+        }
+    }
+
+    impl DafnyPrint
+        for _i64 {
+        /// For Dafny print statements
+        fn fmt_print(&self, _formatter: &mut Formatter, in_seq: bool) -> Result {
+            DafnyPrint::fmt_print(&self.0, _formatter, in_seq)
+        }
+    }
+
+    impl Deref
+        for _i64 {
+        type Target = i64;
+        fn deref(&self) -> &Self::Target {
+            &self.0
+        }
+    }
+
+    impl _i64 {
+        /// SAFETY: The newtype is marked as transparent
+        pub fn _from_ref(o: &i64) -> &Self {
+            unsafe {
+                transmute(o)
+            }
+        }
+    }
+
+    impl Add
+        for _i64 {
+        type Output = _i64;
+        fn add(self, other: Self) -> Self {
+            _i64(self.0 + other.0)
+        }
+    }
+
+    impl Sub
+        for _i64 {
+        type Output = _i64;
+        fn sub(self, other: Self) -> Self {
+            _i64(self.0 - other.0)
+        }
+    }
+
+    impl Mul
+        for _i64 {
+        type Output = _i64;
+        fn mul(self, other: Self) -> Self {
+            _i64(self.0 * other.0)
+        }
+    }
+
+    impl Div
+        for _i64 {
+        type Output = _i64;
+        fn div(self, other: Self) -> Self {
+            _i64(self.0 / other.0)
+        }
+    }
+
+    impl PartialOrd
+        for _i64 {
+        fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+            PartialOrd::partial_cmp(&self.0, &other.0)
+        }
+    }
+}
+
+
+fn load_cols_from_tbl(tbl_path: &str, limit: usize) -> ::dafny_runtime::Object<crate::_dafny_externs::ColsNative> {
+    use std::collections::HashMap;
+    use std::fs::File;
+    use std::io::{BufRead, BufReader};
+    use std::sync::Arc;
+    use crate::_dafny_externs::ColsNative;
+    let mut base = std::env::current_dir().unwrap();
+    let mut p = base.join(tbl_path);
+    while !p.exists() {
+        match base.parent() { Some(par) => { base = par.to_path_buf(); p = base.join(tbl_path); } None => break }
+    }
+    let mut rdr = BufReader::new(File::open(&p).unwrap());
+    let mut hdr = String::new();
+    rdr.read_line(&mut hdr).unwrap();
+    let mut ci: HashMap<String, usize> = HashMap::new();
+    for (i, c) in hdr.split('|').enumerate() { ci.insert(c.trim().to_uppercase(), i); }
+    let mut v_lo_orderkey: Vec<u32> = Vec::new();
+    let mut v_lo_linenumber: Vec<u32> = Vec::new();
+    let mut v_lo_custkey: Vec<u32> = Vec::new();
+    let mut v_lo_partkey: Vec<u32> = Vec::new();
+    let mut v_lo_suppkey: Vec<u32> = Vec::new();
+    let mut v_lo_orderdate: Vec<u32> = Vec::new();
+    let mut v_lo_orderpriority: Vec<String> = Vec::new();
+    let mut v_lo_shippriority: Vec<u32> = Vec::new();
+    let mut v_lo_quantity: Vec<u32> = Vec::new();
+    let mut v_lo_extendedprice: Vec<u64> = Vec::new();
+    let mut v_lo_ordtotalprice: Vec<u64> = Vec::new();
+    let mut v_lo_discount: Vec<u32> = Vec::new();
+    let mut v_lo_revenue: Vec<u64> = Vec::new();
+    let mut v_lo_supplycost: Vec<u64> = Vec::new();
+    let mut v_lo_tax: Vec<u32> = Vec::new();
+    let mut v_lo_commitdate: Vec<u32> = Vec::new();
+    let mut v_lo_shipmode: Vec<String> = Vec::new();
+    let mut v_c_name: Vec<String> = Vec::new();
+    let mut v_c_address: Vec<String> = Vec::new();
+    let mut v_c_city: Vec<String> = Vec::new();
+    let mut v_c_nation: Vec<String> = Vec::new();
+    let mut v_c_region: Vec<String> = Vec::new();
+    let mut v_c_phone: Vec<String> = Vec::new();
+    let mut v_c_mktsegment: Vec<String> = Vec::new();
+    let mut v_s_name: Vec<String> = Vec::new();
+    let mut v_s_address: Vec<String> = Vec::new();
+    let mut v_s_city: Vec<String> = Vec::new();
+    let mut v_s_nation: Vec<String> = Vec::new();
+    let mut v_s_region: Vec<String> = Vec::new();
+    let mut v_s_phone: Vec<String> = Vec::new();
+    let mut v_p_name: Vec<String> = Vec::new();
+    let mut v_p_mfgr: Vec<String> = Vec::new();
+    let mut v_p_category: Vec<String> = Vec::new();
+    let mut v_p_brand: Vec<String> = Vec::new();
+    let mut v_p_color: Vec<String> = Vec::new();
+    let mut v_p_type: Vec<String> = Vec::new();
+    let mut v_p_size: Vec<u32> = Vec::new();
+    let mut v_p_container: Vec<String> = Vec::new();
+    let mut v_d_year: Vec<u32> = Vec::new();
+    let mut v_d_yearmonthnum: Vec<u32> = Vec::new();
+    let mut v_d_weeknuminyear: Vec<u32> = Vec::new();
+    let mut n = 0usize;
+    for ln in rdr.lines().take(limit) {
+        let line = ln.unwrap();
+        let f: Vec<&str> = line.split('|').collect();
+        if f.is_empty() { continue; }
+        v_lo_orderkey.push(f[ci["LO_ORDERKEY"]].parse::<u32>().unwrap());
+        v_lo_linenumber.push(f[ci["LO_LINENUMBER"]].parse::<u32>().unwrap());
+        v_lo_custkey.push(f[ci["LO_CUSTKEY"]].parse::<u32>().unwrap());
+        v_lo_partkey.push(f[ci["LO_PARTKEY"]].parse::<u32>().unwrap());
+        v_lo_suppkey.push(f[ci["LO_SUPPKEY"]].parse::<u32>().unwrap());
+        v_lo_orderdate.push(f[ci["LO_ORDERDATE"]].parse::<u32>().unwrap());
+        v_lo_orderpriority.push(f[ci["LO_ORDERPRIORITY"]].trim_matches('"').to_string());
+        v_lo_shippriority.push(f[ci["LO_SHIPPRIORITY"]].parse::<u32>().unwrap());
+        v_lo_quantity.push(f[ci["LO_QUANTITY"]].parse::<u32>().unwrap());
+        v_lo_extendedprice.push(f[ci["LO_EXTENDEDPRICE"]].parse::<u64>().unwrap());
+        v_lo_ordtotalprice.push(f[ci["LO_ORDTOTALPRICE"]].parse::<u64>().unwrap());
+        v_lo_discount.push(f[ci["LO_DISCOUNT"]].parse::<u32>().unwrap());
+        v_lo_revenue.push(f[ci["LO_REVENUE"]].parse::<u64>().unwrap());
+        v_lo_supplycost.push(f[ci["LO_SUPPLYCOST"]].parse::<u64>().unwrap());
+        v_lo_tax.push(f[ci["LO_TAX"]].parse::<u32>().unwrap());
+        v_lo_commitdate.push(f[ci["LO_COMMITDATE"]].parse::<u32>().unwrap());
+        v_lo_shipmode.push(f[ci["LO_SHIPMODE"]].trim_matches('"').to_string());
+        v_c_name.push(f[ci["C_NAME"]].trim_matches('"').to_string());
+        v_c_address.push(f[ci["C_ADDRESS"]].trim_matches('"').to_string());
+        v_c_city.push(f[ci["C_CITY"]].trim_matches('"').to_string());
+        v_c_nation.push(f[ci["C_NATION"]].trim_matches('"').to_string());
+        v_c_region.push(f[ci["C_REGION"]].trim_matches('"').to_string());
+        v_c_phone.push(f[ci["C_PHONE"]].trim_matches('"').to_string());
+        v_c_mktsegment.push(f[ci["C_MKTSEGMENT"]].trim_matches('"').to_string());
+        v_s_name.push(f[ci["S_NAME"]].trim_matches('"').to_string());
+        v_s_address.push(f[ci["S_ADDRESS"]].trim_matches('"').to_string());
+        v_s_city.push(f[ci["S_CITY"]].trim_matches('"').to_string());
+        v_s_nation.push(f[ci["S_NATION"]].trim_matches('"').to_string());
+        v_s_region.push(f[ci["S_REGION"]].trim_matches('"').to_string());
+        v_s_phone.push(f[ci["S_PHONE"]].trim_matches('"').to_string());
+        v_p_name.push(f[ci["P_NAME"]].trim_matches('"').to_string());
+        v_p_mfgr.push(f[ci["P_MFGR"]].trim_matches('"').to_string());
+        v_p_category.push(f[ci["P_CATEGORY"]].trim_matches('"').to_string());
+        v_p_brand.push(f[ci["P_BRAND"]].trim_matches('"').to_string());
+        v_p_color.push(f[ci["P_COLOR"]].trim_matches('"').to_string());
+        v_p_type.push(f[ci["P_TYPE"]].trim_matches('"').to_string());
+        v_p_size.push(f[ci["P_SIZE"]].parse::<u32>().unwrap());
+        v_p_container.push(f[ci["P_CONTAINER"]].trim_matches('"').to_string());
+        v_d_year.push(f[ci["D_YEAR"]].parse::<u32>().unwrap());
+        v_d_yearmonthnum.push(f[ci["D_YEARMONTHNUM"]].parse::<u32>().unwrap());
+        v_d_weeknuminyear.push(f[ci["D_WEEKNUMINYEAR"]].parse::<u32>().unwrap());
+        n += 1;
+    }
+    ::dafny_runtime::Object::new(ColsNative {
+        n,
+        lo_orderkey: Arc::new(v_lo_orderkey),
+        lo_linenumber: Arc::new(v_lo_linenumber),
+        lo_custkey: Arc::new(v_lo_custkey),
+        lo_partkey: Arc::new(v_lo_partkey),
+        lo_suppkey: Arc::new(v_lo_suppkey),
+        lo_orderdate: Arc::new(v_lo_orderdate),
+        lo_orderpriority: Arc::new(v_lo_orderpriority),
+        lo_shippriority: Arc::new(v_lo_shippriority),
+        lo_quantity: Arc::new(v_lo_quantity),
+        lo_extendedprice: Arc::new(v_lo_extendedprice),
+        lo_ordtotalprice: Arc::new(v_lo_ordtotalprice),
+        lo_discount: Arc::new(v_lo_discount),
+        lo_revenue: Arc::new(v_lo_revenue),
+        lo_supplycost: Arc::new(v_lo_supplycost),
+        lo_tax: Arc::new(v_lo_tax),
+        lo_commitdate: Arc::new(v_lo_commitdate),
+        lo_shipmode: Arc::new(v_lo_shipmode),
+        c_name: Arc::new(v_c_name),
+        c_address: Arc::new(v_c_address),
+        c_city: Arc::new(v_c_city),
+        c_nation: Arc::new(v_c_nation),
+        c_region: Arc::new(v_c_region),
+        c_phone: Arc::new(v_c_phone),
+        c_mktsegment: Arc::new(v_c_mktsegment),
+        s_name: Arc::new(v_s_name),
+        s_address: Arc::new(v_s_address),
+        s_city: Arc::new(v_s_city),
+        s_nation: Arc::new(v_s_nation),
+        s_region: Arc::new(v_s_region),
+        s_phone: Arc::new(v_s_phone),
+        p_name: Arc::new(v_p_name),
+        p_mfgr: Arc::new(v_p_mfgr),
+        p_category: Arc::new(v_p_category),
+        p_brand: Arc::new(v_p_brand),
+        p_color: Arc::new(v_p_color),
+        p_type: Arc::new(v_p_type),
+        p_size: Arc::new(v_p_size),
+        p_container: Arc::new(v_p_container),
+        d_year: Arc::new(v_d_year),
+        d_yearmonthnum: Arc::new(v_d_yearmonthnum),
+        d_weeknuminyear: Arc::new(v_d_weeknuminyear),
+    })
+}
+
+fn main() {
+    use std::time::Instant;
+    let cols = load_cols_from_tbl("ssb-dbgen/lineorder_flat.tbl", 50000);
+    for run in 0..3 {
+        let t0 = Instant::now();
+        let _ = crate::_module::_default::RunQuery(&cols);
+        let dt = t0.elapsed().as_micros();
+        if run == 2 {
+            println!("QUERY_LATENCY_US: {}", dt);
+        }
+    }
+}

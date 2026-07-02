@@ -14,9 +14,13 @@ import sys
 if ROOT_DIR not in sys.path:
     sys.path.insert(0, ROOT_DIR)
 
-from sql_transpiler import transpile_sql_to_dafny
+from sql_transpiler import transpile_sql_to_dafny_columnar
 from research_loop.ssb_workload import queries
 from db_extension import DatabaseCatalog
+from research_loop.pipeline_log import log_debug, log_info, log_trace
+from research_loop.pipeline_columnar import DEFAULT_TBL, dafny_translate_cmd, sync_rust_src
+
+COMPONENT = "harness"
 
 catalog = DatabaseCatalog()
 schema = catalog.get_table_schema("lineorder_flat")
@@ -99,6 +103,9 @@ def main():
     parser.add_argument("-d", "--dataset-size", type=int, default=50000, help="Dataset size for benchmarking. Default: 50000")
     args = parser.parse_args()
 
+    for k, v in load_env(os.path.join(CURRENT_DIR, "config.env")).items():
+        os.environ.setdefault(k, v)
+
     # Validate query index
     if args.query < 1 or args.query > len(queries):
         print(json.dumps({
@@ -130,6 +137,7 @@ def main():
         sys.exit(0)
 
     sql_query = queries[args.query - 1]
+    log_info(COMPONENT, "start", f"q={args.query}", dataset_size=args.dataset_size)
     
     # 1. Load Configurations
     config = load_env(os.path.join(CURRENT_DIR, "config.env"))
@@ -139,8 +147,9 @@ def main():
     # 2. Transpile SQL query to Dafny (timing this step)
     start_transpile = time.perf_counter()
     try:
-        dafny_spec = transpile_sql_to_dafny(sql_query, schema)
+        dafny_spec = transpile_sql_to_dafny_columnar(sql_query, schema)
         transpile_time_ms = int((time.perf_counter() - start_transpile) * 1000)
+        log_debug(COMPONENT, "transpile_done", f"{transpile_time_ms}ms")
     except Exception as e:
         transpile_time_ms = int((time.perf_counter() - start_transpile) * 1000)
         exit_with_metrics("FAILURE", False, -1, f"SQL Transpilation failed: {e}")
@@ -150,9 +159,11 @@ def main():
     agent_code = None
     if os.path.exists(agent_body_path):
         from research_loop.assemble_runquery import assemble_runquery_from_body
+        log_debug(COMPONENT, "assemble_body", "agent RunQuery body path", path=agent_body_path)
         try:
             with open(agent_body_path) as f:
                 agent_code = assemble_runquery_from_body(dafny_spec, f.read())
+            log_info(COMPONENT, "assemble_done", "trusted RunQuery shell + agent body")
         except Exception as e:
             exit_with_metrics("FAILURE", False, -1, f"RunQuery body assembly failed: {e}")
 
@@ -168,12 +179,10 @@ def main():
             )
 
     # 4. Generate the Main method and full source file
-    main_code = f"""
-method {{:verify false}} Main() {{
-  var data: seq<Row> := [];
-  var opt_res := RunQuery(data);
+    main_code = """
+method {:verify false} Main() {
   print "SUCCESS\\n";
-}}
+}
 """
     
     full_source = f"{dafny_spec}\n\n{agent_code}\n\n{main_code}"
@@ -188,7 +197,14 @@ method {{:verify false}} Main() {{
         f.write(full_source)
 
     from research_loop.admit_runquery import admit_runquery
+    log_debug(COMPONENT, "admit_start", "RunQuery admission gate")
     admission = admit_runquery(full_source)
+    log_info(
+        COMPONENT,
+        "admit_done",
+        f"ok={admission.ok} mode={admission.native_agg.value}",
+        violations=admission.violations,
+    )
     if not admission.ok:
         exit_with_metrics(
             "FAILURE",
@@ -206,6 +222,7 @@ method {{:verify false}} Main() {{
     ]
     
     start_verify = time.perf_counter()
+    log_debug(COMPONENT, "dafny_verify_start", "dafny verify", path=working_dfy_path)
     try:
         verify_res = subprocess.run(
             verify_cmd,
@@ -214,6 +231,7 @@ method {{:verify false}} Main() {{
             timeout=dafny_verify_timeout
         )
         verify_time_ms = int((time.perf_counter() - start_verify) * 1000)
+        log_info(COMPONENT, "dafny_verify_done", f"{verify_time_ms}ms", ok=verify_res.returncode == 0)
         if verify_res.returncode != 0:
             error_msg = verify_res.stdout + "\n" + verify_res.stderr
             shutil.rmtree(temp_build_dir, ignore_errors=True)
@@ -223,77 +241,66 @@ method {{:verify false}} Main() {{
         shutil.rmtree(temp_build_dir, ignore_errors=True)
         exit_with_metrics("FAILURE", False, -1, f"Dafny verification timed out after {dafny_verify_timeout} seconds.")
 
-    # 6. Translate/Build Target Code (Rust) in the temp directory (timing this step)
+    # 6. Translate Target Code (Rust, columnar + native bridge)
     stable_rust_dir = os.path.join(CURRENT_DIR, "working_query-rust")
     temp_rust_dir = os.path.join(temp_build_dir, "working_query-rust")
-    needs_full_build = not os.path.exists(stable_rust_dir) or not os.path.exists(os.path.join(stable_rust_dir, "Cargo.toml"))
-    
+
     start_compile = time.perf_counter()
-    if needs_full_build:
-        build_cmd = [
-            "dafny", "build",
-            "--target:rs",
-            "--enforce-determinism",
-            "--no-verify",
-            "--allow-warnings",
-            working_dfy_path
-        ]
-    else:
-        build_cmd = [
-            "dafny", "translate", "rs",
-            "--enforce-determinism",
-            "--no-verify",
-            "--allow-warnings",
-            working_dfy_path
-        ]
-    
+    log_debug(COMPONENT, "codegen_start", "dafny translate rs (columnar)")
+    build_cmd = dafny_translate_cmd(working_dfy_path, temp_build_dir, schema)
+
     try:
         build_res = subprocess.run(
             build_cmd,
             cwd=temp_build_dir,
             capture_output=True,
             text=True,
-            timeout=compile_timeout
+            timeout=compile_timeout,
+        )
+        log_info(
+            COMPONENT,
+            "codegen_done",
+            f"{int((time.perf_counter() - start_compile) * 1000)}ms",
+            ok=build_res.returncode == 0,
         )
         if build_res.returncode != 0:
             error_msg = build_res.stdout + "\n" + build_res.stderr
             shutil.rmtree(temp_build_dir, ignore_errors=True)
-            exit_with_metrics("FAILURE", True, -1, f"Dafny build (codegen) failed:\n{error_msg.strip()}")
+            exit_with_metrics("FAILURE", True, -1, f"Dafny translate (codegen) failed:\n{error_msg.strip()}")
     except subprocess.TimeoutExpired:
         shutil.rmtree(temp_build_dir, ignore_errors=True)
-        exit_with_metrics("FAILURE", True, -1, f"Dafny build timed out after {compile_timeout} seconds.")
+        exit_with_metrics("FAILURE", True, -1, f"Dafny translate timed out after {compile_timeout} seconds.")
 
-    # 6b. Sync generated Rust files into stable, cached workspace
+    # 6b. Sync generated Rust src into stable workspace (keep runtime + Cargo.toml)
     try:
-        if needs_full_build:
-            shutil.rmtree(stable_rust_dir, ignore_errors=True)
-            shutil.copytree(temp_rust_dir, stable_rust_dir)
-        else:
-            src_file_temp = os.path.join(temp_rust_dir, "src", "working_query.rs")
-            src_file_stable = os.path.join(stable_rust_dir, "src", "working_query.rs")
-            shutil.copy2(src_file_temp, src_file_stable)
-            
-            metadata_temp = os.path.join(temp_rust_dir, "src", "working_query-rs.dtr")
-            metadata_stable = os.path.join(stable_rust_dir, "src", "working_query-rs.dtr")
-            if os.path.exists(metadata_temp):
-                shutil.copy2(metadata_temp, metadata_stable)
+        sync_rust_src(temp_rust_dir, stable_rust_dir)
     except Exception as e:
         shutil.rmtree(temp_build_dir, ignore_errors=True)
         exit_with_metrics("FAILURE", True, -1, f"Failed to sync generated Rust source into stable workspace: {e}")
 
     shutil.rmtree(temp_build_dir, ignore_errors=True)
 
-    # 6c. Apply custom u64 Native Approximation Compiler Pass
+    rust_src = os.path.join(stable_rust_dir, "src", "working_query.rs")
+    tbl_path = DEFAULT_TBL
+
+    # 6c. Postprocess + hot-loop benchmark main
+    log_debug(COMPONENT, "postprocess_start", "optimize_rust_file", fast_agg=admission.allow_fast_native_agg)
     try:
-        optimize_rust_file(
-            os.path.join(stable_rust_dir, "src", "working_query.rs"),
+        from research_loop.postprocessor import inject_hot_loop_main, postprocess
+        postprocess(
+            rust_src,
+            tbl_path,
+            args.dataset_size,
             allow_fast_native_agg=admission.allow_fast_native_agg,
         )
+        inject_hot_loop_main(rust_src, tbl_path, args.dataset_size)
     except Exception as e:
         exit_with_metrics("FAILURE", True, -1, f"Custom u64 Rust optimization pass failed: {e}")
+    log_debug(COMPONENT, "postprocess_done", "optimize_rust_file + hot loop main")
 
     # 7. Native Compilation using Cargo (Release Mode)
     cargo_toml_path = os.path.join(stable_rust_dir, "Cargo.toml")
+    log_debug(COMPONENT, "cargo_start", "cargo build --release", manifest=cargo_toml_path)
     cargo_cmd = ["cargo", "build", "--release", "--manifest-path", cargo_toml_path]
     
     try:
@@ -307,6 +314,7 @@ method {{:verify false}} Main() {{
             env=env
         )
         compile_time_ms = int((time.perf_counter() - start_compile) * 1000)
+        log_info(COMPONENT, "cargo_done", f"{compile_time_ms}ms", ok=cargo_res.returncode == 0)
         if cargo_res.returncode != 0:
             error_msg = cargo_res.stdout + "\n" + cargo_res.stderr
             exit_with_metrics("FAILURE", True, -1, f"Cargo release build failed:\n{error_msg.strip()}")
@@ -323,9 +331,10 @@ method {{:verify false}} Main() {{
         start_time = time.perf_counter()
         run_res = subprocess.run(
             [binary_path],
+            cwd=ROOT_DIR,
             capture_output=True,
             text=True,
-            timeout=10
+            timeout=10,
         )
         end_time = time.perf_counter()
         stdout = run_res.stdout.strip()
@@ -342,6 +351,7 @@ method {{:verify false}} Main() {{
         if "ERROR" in stdout or "runtime mismatch" in stdout:
             exit_with_metrics("FAILURE", True, -1, f"Runtime mismatch: result of optimized method did not match reference spec.\nSTDOUT: {stdout}")
 
+        log_info(COMPONENT, "execute_done", f"latency_us={latency_us}")
         # Successful execution
         exit_with_metrics("SUCCESS", True, latency_us, "")
 

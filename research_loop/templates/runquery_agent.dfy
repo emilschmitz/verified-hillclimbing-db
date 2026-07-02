@@ -3,14 +3,14 @@
 // Do not change requires/ensures (the host injects those).
 {
   // Example starter (replace with your optimized loop):
-  // res := 0;
-  // var i := |data|;
+  // res := 0 as NativeU64;
+  // var i := cols.n();
   // while i > 0
-  //   invariant 0 <= i <= |data|
-  //   invariant res == MethodSpec(data[i..])
+  //   invariant 0 <= i <= cols.n()
+  //   invariant res as int == MethodSpecHelper(cols, i) as int
   // {
   //   i := i - 1;
-  //   var row := data[i];
+  //   var od := cols.GetLO_ORDERDATE(i);
   //   ...
   // }
 }

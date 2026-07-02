@@ -744,7 +744,7 @@ def _native_u64_term(term_row_expr: str, idx: str) -> str:
     )
     if m:
         a, b = m.group(1), m.group(2)
-        return f"MulU64U32(cols.Get{a}({idx}), cols.Get{b}({idx}))"
+        return f"MulU64U32(cols.Get{a}({idx}) as NativeU64, cols.Get{b}({idx}))"
     return f"({_to_col_expr(term_row_expr, idx)}) as NativeU64"
 
 

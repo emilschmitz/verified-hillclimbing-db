@@ -7,11 +7,14 @@ import shutil
 import subprocess
 from pathlib import Path
 
+from research_loop.pipeline_log import log_debug, log_info, log_trace, log_warn
+
 ROOT = Path(__file__).resolve().parents[1]
 RESEARCH = Path(__file__).resolve().parent
 TEMPLATE = RESEARCH / "templates" / "runquery_agent.dfy"
 DEFAULT_IMAGE = "verified-hillclimbing-agent:latest"
 DEFAULT_WORKSPACE = RESEARCH / "agent_workspace"
+COMPONENT = "agent_sandbox"
 
 
 def load_agent_config(config: dict[str, str] | None = None) -> dict[str, str]:
@@ -37,9 +40,16 @@ def load_agent_config(config: dict[str, str] | None = None) -> dict[str, str]:
     return cfg
 
 
-def parse_agent_env(cfg: dict[str, str]) -> dict[str, str]:
-    """Pass named vars from host into container (AGENT_ENV=CURSOR_API_KEY,...)."""
-    out: dict[str, str] = {}
+def use_docker(cfg: dict[str, str]) -> bool:
+    return cfg.get("USE_AGENT_DOCKER", "0") not in ("0", "false", "False", "")
+
+
+def parse_agent_env(cfg: dict[str, str], base: dict[str, str] | None = None) -> dict[str, str]:
+    """Pass named vars from host into agent subprocess (AGENT_ENV=CURSOR_API_KEY,...)."""
+    if base is None:
+        out = os.environ.copy()
+    else:
+        out = dict(base)
     spec = cfg.get("AGENT_ENV", "CURSOR_API_KEY").strip()
     if not spec:
         return out
@@ -56,6 +66,7 @@ def default_agent_cmd() -> str:
 
 def build_agent_prompt(
     *,
+    workspace: Path,
     query_id: int,
     dafny_spec: str,
     iteration: int,
@@ -63,25 +74,49 @@ def build_agent_prompt(
     last_error: str = "",
     last_latency_us: int = -1,
 ) -> str:
+    ws = workspace.resolve()
+    body_path = ws / "runquery_agent.dfy"
+    spec_path = ws / "context" / "ro" / "spec.dfy"
+    guide_path = ws / "context" / "ro" / "COMPILATION_GUIDE.md"
+
     feedback = ""
     if last_error:
-        feedback = f"\nPrevious iteration failed:\n{last_error}\n"
+        feedback = f"\n## Previous iteration failure\n{last_error}\n"
     elif last_latency_us >= 0:
-        feedback = f"\nPrevious iteration verified with latency {last_latency_us} us. Try to beat it.\n"
+        feedback = f"\n## Previous iteration\nVerified OK at {last_latency_us} us — try to beat that latency.\n"
 
-    return f"""You are optimizing SSB query {query_id} (iteration {iteration}/{max_iterations}).
+    return f"""# Verified hillclimbing — RunQuery optimizer (SSB Q{query_id}, iter {iteration}/{max_iterations})
 
-Read /context/ro/COMPILATION_GUIDE.md and /context/ro/spec.dfy (read-only ground truth).
+## Your task
+Write a **fast, verifiable** Dafny RunQuery **body** for the SQL query. The host will inject the method signature and `ensures res == MethodSpec(data)`.
 
-Your ONLY deliverable: edit /workspace/rw/runquery_agent.dfy — the body inside the braces only.
+## ALLOWED (only these)
+1. **Edit one file**: `{body_path}`
+2. **Change only** the statements inside the outer `{{ ... }}` braces (the RunQuery body).
+3. **Read** (do not modify):
+   - `{spec_path}` — MethodSpec ground truth
+   - `{guide_path}` — Dafny→Rust / postprocessor patterns
+4. **Save** `{body_path}` and **exit** — saving the file is your submission.
 
-Rules:
-1. Do NOT add method, function, lemma, class, or module declarations.
-2. Do NOT write requires/ensures (host injects those).
-3. Use backward loop invariants matching MethodSpec (e.g. res == MethodSpec(data[i..])).
-4. Save runquery_agent.dfy and exit — that is your submission.
+## FORBIDDEN
+- Do NOT create, edit, or delete any other file.
+- Do NOT add `method`, `function`, `lemma`, `predicate`, `class`, or `module` declarations.
+- Do NOT write `requires`, `ensures`, or change the RunQuery signature (host adds those).
+- Do NOT use `{{:verify false}}`, `axiom`, or `assume` to cheat verification.
+- Do NOT modify postprocessor, harness, transpiler, or spec files.
+- Do NOT run `dafny verify` yourself unless needed to sanity-check; the host pipeline will verify.
+
+## Verification hints
+- Use a **backward** loop: `var i := cols.n(); while i > 0 {{ i := i - 1; ... }}`
+- Scalar invariant: `res as int == MethodSpecHelper(cols, i) as int`
+- Access columns via `cols.GetCOLUMNNAME(i)` (see spec / skeleton comments).
+- Match return/types from MethodSpec in `{spec_path}`.
 
 {feedback}
+## Spec excerpt (full file: {spec_path})
+```dafny
+{dafny_spec[:14000]}
+```
 """
 
 
@@ -101,7 +136,45 @@ def prepare_workspace(
     body_path = workspace / "runquery_agent.dfy"
     if reset_body or not body_path.exists():
         shutil.copy2(TEMPLATE, body_path)
+        log_debug(COMPONENT, "workspace_reset", "copied template", path=str(body_path))
+    log_trace(COMPONENT, "workspace_ready", "context prepared", workspace=str(workspace))
     return body_path
+
+
+def run_agent_local(
+    workspace: Path,
+    prompt: str,
+    cfg: dict[str, str] | None = None,
+) -> subprocess.CompletedProcess[str]:
+    cfg = load_agent_config(cfg)
+    agent_cmd = cfg.get("AGENT_CMD", default_agent_cmd())
+    timeout = int(cfg.get("AGENT_TIMEOUT_SEC", "600"))
+    prompt_path = workspace / "PROMPT.txt"
+    prompt_path.write_text(prompt)
+    env = parse_agent_env(cfg)
+
+    log_info(COMPONENT, "agent_subprocess_start", "local bash -lc AGENT_CMD", cwd=str(workspace))
+    log_debug(COMPONENT, "agent_cmd", agent_cmd)
+    log_trace(COMPONENT, "prompt_bytes", str(prompt_path.stat().st_size))
+
+    proc = subprocess.run(
+        ["bash", "-lc", agent_cmd],
+        cwd=workspace,
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=timeout,
+    )
+    log_info(
+        COMPONENT,
+        "agent_subprocess_end",
+        f"exit={proc.returncode}",
+        stdout_len=len(proc.stdout or ""),
+        stderr_len=len(proc.stderr or ""),
+    )
+    if proc.returncode != 0:
+        log_warn(COMPONENT, "agent_failed", (proc.stderr or proc.stdout or "")[:800])
+    return proc
 
 
 def run_agent_docker(
@@ -115,9 +188,10 @@ def run_agent_docker(
     timeout = int(cfg.get("AGENT_TIMEOUT_SEC", "600"))
     (workspace / "PROMPT.txt").write_text(prompt)
 
-    env = parse_agent_env(cfg)
+    env = parse_agent_env(cfg, base={})
     env["AGENT_CMD"] = agent_cmd
 
+    log_info(COMPONENT, "agent_docker_start", f"docker run {image}", image=image)
     cmd = [
         "docker", "run", "--rm",
         "--network", "bridge",
@@ -128,14 +202,18 @@ def run_agent_docker(
     for k, v in env.items():
         cmd.extend(["-e", f"{k}={v}"])
     cmd.append(image)
-    return subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+    proc = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+    log_info(COMPONENT, "agent_docker_end", f"exit={proc.returncode}")
+    return proc
 
 
 def read_agent_body(workspace: Path) -> str:
     path = workspace / "runquery_agent.dfy"
     if not path.exists():
         raise FileNotFoundError(f"Agent body not found: {path}")
-    return path.read_text()
+    text = path.read_text()
+    log_debug(COMPONENT, "body_read", f"{len(text)} bytes", path=str(path))
+    return text
 
 
 def run_agent_iteration(
@@ -150,9 +228,11 @@ def run_agent_iteration(
     reset_body: bool = False,
     cfg: dict[str, str] | None = None,
 ) -> tuple[str, subprocess.CompletedProcess[str]]:
+    cfg = load_agent_config(cfg)
     ws = workspace or DEFAULT_WORKSPACE
     prepare_workspace(ws, dafny_spec=dafny_spec, reset_body=reset_body or iteration == 1)
     prompt = build_agent_prompt(
+        workspace=ws,
         query_id=query_id,
         dafny_spec=dafny_spec,
         iteration=iteration,
@@ -160,7 +240,10 @@ def run_agent_iteration(
         last_error=last_error,
         last_latency_us=last_latency_us,
     )
-    proc = run_agent_docker(ws, prompt, cfg=cfg)
+    if use_docker(cfg):
+        proc = run_agent_docker(ws, prompt, cfg=cfg)
+    else:
+        proc = run_agent_local(ws, prompt, cfg=cfg)
     return read_agent_body(ws), proc
 
 

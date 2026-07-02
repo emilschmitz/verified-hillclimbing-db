@@ -95,12 +95,24 @@ def extract_runquery_body_text(raw: str) -> str:
 
 def runquery_shell_from_spec(dafny_spec: str) -> str:
     """Build trusted RunQuery header + opening brace from transpiled spec."""
+    col_match = re.search(
+        r"function\s+(?:\{[^}]*\}\s+)?MethodSpec\(cols:\s*Cols\)\s*:\s*([^\n{]+)",
+        dafny_spec,
+    )
+    if col_match:
+        ret_type = col_match.group(1).strip()
+        return (
+            f"method RunQuery(cols: Cols) returns (res: {ret_type})\n"
+            f"  requires ValidCols(cols)\n"
+            f"  ensures res == MethodSpec(cols)\n"
+            "{\n"
+        )
     ret_match = re.search(
-        r"function\s+MethodSpec\(data:\s*seq<Row>\)\s*:\s*([^\n{]+)",
+        r"function\s+(?:\{[^}]*\}\s+)?MethodSpec\(data:\s*seq<Row>\)\s*:\s*([^\n{]+)",
         dafny_spec,
     )
     if not ret_match:
-        raise ValueError("Could not find MethodSpec(data: seq<Row>) return type in spec")
+        raise ValueError("Could not find MethodSpec(cols: Cols) or MethodSpec(data: seq<Row>) in spec")
     ret_type = ret_match.group(1).strip()
     return (
         f"method RunQuery(data: seq<Row>) returns (res: {ret_type})\n"

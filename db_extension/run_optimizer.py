@@ -15,6 +15,17 @@ if root_dir not in sys.path:
 
 from db_extension.utils import setup_db, get_sql_hash, load_cache, save_cache, print_result_table, BIN_DIR
 from db_extension.optimizer import run_optimization_loop
+from research_loop.harness import load_env
+from research_loop.pipeline_log import log_info
+
+COMPONENT = "run_optimizer"
+CONFIG_ENV = os.path.join(root_dir, "research_loop", "config.env")
+
+
+def apply_config_env() -> None:
+    """Apply config.env defaults without overriding explicit process env."""
+    for k, v in load_env(CONFIG_ENV).items():
+        os.environ.setdefault(k, v)
 
 # ANSI Color Codes
 COLOR_GREEN = "\033[92m"
@@ -25,6 +36,7 @@ COLOR_CYAN = "\033[96m"
 COLOR_RESET = "\033[0m"
 
 def main():
+    apply_config_env()
     if len(sys.argv) < 2:
         print("Usage: python -m db_extension.run_optimizer <sql_query> or --file <file_path>")
         sys.exit(1)
@@ -34,6 +46,8 @@ def main():
             sql = f.read().strip()
     else:
         sql = sys.argv[1]
+    
+    log_info(COMPONENT, "start", "run_optimizer invoked", sql_preview=sql[:120], mock=os.environ.get("MOCK_AGENT", "1"))
     
     # Initialize a connection to run the baseline and fetch results
     con = duckdb.connect()
