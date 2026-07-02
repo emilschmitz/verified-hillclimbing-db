@@ -27,5 +27,8 @@ def postprocess(file_path: str):
 
     # Run the postprocessor binary on the file
     res = subprocess.run([binary_path, file_path, "ssb-dbgen/lineorder_flat.tbl"], capture_output=True, text=True)
+    if res.stderr:
+        import sys
+        sys.stderr.write(res.stderr)
     if res.returncode != 0:
         raise RuntimeError(f"Rust postprocessor failed on {file_path}:\n{res.stderr}")

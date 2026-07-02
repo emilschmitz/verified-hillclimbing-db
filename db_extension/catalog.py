@@ -20,7 +20,10 @@ class DatabaseCatalog:
 
     def get_table_schema(self, table_name: str) -> dict[str, str]:
         """
-        Returns column names mapped to types (e.g. {'LO_QUANTITY': 'int', 'LO_SHIPMODE': 'string'})
+        Returns column names mapped to DuckDB data types, *preserved as
+        DuckDB returned them* (e.g. {'LO_QUANTITY': 'INTEGER', 'LO_REVENUE':
+        'BIGINT', 'LO_SHIPMODE': 'VARCHAR'}).  Downstream consumers use
+        the catalog type directly; no column-name based heuristics.
         """
         self._ensure_connection()
         schema_dict = {}
@@ -29,26 +32,16 @@ class DatabaseCatalog:
             try:
                 # Query INFORMATION_SCHEMA.COLUMNS
                 query = """
-                    SELECT column_name, data_type 
-                    FROM information_schema.columns 
+                    SELECT column_name, data_type
+                    FROM information_schema.columns
                     WHERE lower(table_name) = lower(?);
                 """
                 res = self.con.execute(query, [table_name]).fetchall()
                 if res:
                     for col_name, data_type in res:
-                        col_upper = col_name.upper()
-                        dt_upper = data_type.upper()
-                        # Map DuckDB types to our high-level catalog types
-                        if any(t in dt_upper for t in ("INT", "KEY", "DATE", "NUM", "YEAR", "PRICE", "TAX", "DISCOUNT", "QUANTITY", "REVENUE", "COST")):
-                            schema_dict[col_upper] = "int"
-                        elif any(t in dt_upper for t in ("CHAR", "VARCHAR", "TEXT", "STRING")):
-                            schema_dict[col_upper] = "string"
-                        else:
-                            # Default fallback
-                            schema_dict[col_upper] = "int" if "INT" in dt_upper or "DOUBLE" in dt_upper or "FLOAT" in dt_upper or "DECIMAL" in dt_upper else "string"
+                        schema_dict[col_name.upper()] = data_type.upper()
                     return schema_dict
-            except Exception as e:
-                # If query fails, fall back
+            except Exception:
                 pass
 
         # Fallback 1: Parse a local SQL DDL file if present in the workspace
@@ -58,10 +51,17 @@ class DatabaseCatalog:
             if schema_dict:
                 return schema_dict
 
-        # Fallback 2: Hardcoded SSB workload schema if querying lineorder_flat
+        # Fallback 2: Hardcoded SSB workload schema if querying lineorder_flat.
+        # Kept as bootstrap for environments without a live DuckDB connection
+        # (e.g. running the unit tests offline).  New tables should be
+        # loaded into DuckDB instead of adding to this fallback.
         if table_name.lower() == "lineorder_flat":
-            from research_loop.ssb_workload import schema as ssb_schema
-            return ssb_schema
+            from research_loop.ssb_workload import schema as ssb_schema, fallback_dtypes
+            # Down-convert the high-level 'int'/'string' shape to concrete
+            # DuckDB types so the transpiler's get_dafny_type can pick the
+            # right width from the type, not the column name.
+            return {col: (fallback_dtypes.get(col, "INTEGER") if t == "int" else "VARCHAR")
+                    for col, t in ssb_schema.items()}
 
         return {}
 

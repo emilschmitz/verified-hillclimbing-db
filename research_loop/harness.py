@@ -22,6 +22,15 @@ catalog = DatabaseCatalog()
 schema = catalog.get_table_schema("lineorder_flat")
 
 
+def get_dafny_type(col: str, col_type: str) -> str:
+    """Local fallback kept only for backwards compatibility with callers
+    that haven't been migrated to the catalog.  Same logic as
+    `sql_transpiler.transpiler.get_dafny_type` — see that for details.
+    """
+    from sql_transpiler.transpiler import get_dafny_type as _impl
+    return _impl(col, col_type)
+
+
 def load_env(env_path):
     env = {}
     if os.path.exists(env_path):
@@ -47,13 +56,6 @@ def extract_dafny_code(scratchpad_path):
     if not match:
         return None
     return match.group(1).strip()
-
-def get_dafny_type(col: str, col_type: str) -> str:
-    if col_type == 'int':
-        if col.upper() in ('LO_EXTENDEDPRICE', 'LO_ORDTOTALPRICE', 'LO_REVENUE', 'LO_SUPPLYCOST'):
-            return 'bv64'
-        return 'bv32'
-    return col_type
 
 # ==============================================================================
 # TODO: THIS POST-PROCESSOR (optimize_rust_file) NEEDS TO BE EXTENSIVELY
@@ -89,52 +91,6 @@ def get_dafny_type(col: str, col_type: str) -> str:
 def optimize_rust_file(file_path):
     from research_loop.postprocessor import postprocess
     postprocess(file_path)
-
-def generate_row_expr(i_val_str="i"):
-    """
-    Generates a Dafny Row constructor expression dynamically based on the schema,
-    using cyclic values to populate the fields of the sequence.
-    """
-    row_fields = []
-    for col in schema:
-        col_type = schema[col]
-        if col_type == 'int':
-            if col == "LO_ORDERDATE":
-                expr = f"19930101 + ({i_val_str} % 365)"
-            elif col == "LO_DISCOUNT":
-                expr = f"{i_val_str} % 10"
-            elif col == "LO_QUANTITY":
-                expr = f"{i_val_str} % 50"
-            elif col == "D_YEAR":
-                expr = f"1992 + ({i_val_str} % 7)"
-            elif col == "D_WEEKNUMINYEAR":
-                expr = f"1 + ({i_val_str} % 52)"
-            elif col in ("LO_EXTENDEDPRICE", "LO_REVENUE", "LO_SUPPLYCOST", "LO_ORDTOTALPRICE"):
-                expr = f"1000 + ({i_val_str} % 1000)"
-            else:
-                expr = f"1 + ({i_val_str} % 100)"
-            
-            expr = f"({expr}) as {get_dafny_type(col, col_type)}"
-        else:
-            if col == "P_CATEGORY":
-                expr = f'if {i_val_str} % 3 == 0 then "MFGR#12" else "MFGR#14"'
-            elif col in ("S_REGION", "C_REGION"):
-                expr = f'if {i_val_str} % 2 == 0 then "AMERICA" else "ASIA"'
-            elif col == "P_BRAND":
-                expr = f'if {i_val_str} % 4 == 0 then "MFGR#2221" else "MFGR#2222"'
-            elif col in ("C_NATION", "S_NATION"):
-                expr = f'if {i_val_str} % 5 == 0 then "UNITED STATES" else "UNITED KINGDOM"'
-            elif col == "C_CITY":
-                expr = f'if {i_val_str} % 2 == 0 then "UNITED KI1" else "UNITED KI2"'
-            elif col == "S_CITY":
-                expr = f'if {i_val_str} % 2 == 0 then "UNITED KI5" else "UNITED KI6"'
-            elif col == "LO_ORDERPRIORITY":
-                expr = f'if {i_val_str} % 2 == 0 then "1-URGENT" else "2-HIGH"'
-            else:
-                expr = '"dummy"'
-        row_fields.append(expr)
-    
-    return f"Row({', '.join(row_fields)})"
 
 
 def main():
@@ -196,11 +152,9 @@ def main():
         exit_with_metrics("FAILURE", False, -1, f"SQL Transpilation failed: {e}")
 
     # 4. Generate the Main method and full source file
-    row_constructor = generate_row_expr("i")
-    
     main_code = f"""
 method {{:verify false}} Main() {{
-  var data := seq({args.dataset_size}, i => {row_constructor});
+  var data: seq<Row> := [];
   var opt_res := RunQuery(data);
   print "SUCCESS\\n";
 }}

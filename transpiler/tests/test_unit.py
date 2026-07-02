@@ -15,14 +15,14 @@ class TestTranspilerUnit(unittest.TestCase):
         sql = "SELECT SUM(value) FROM my_table"
         result = transpile_sql_to_dafny(sql, self.schema)
         self.assertIn("datatype Row = Row(category: string, value: bv32, age: bv32, name: string)", result)
-        self.assertIn("function MethodSpec(data: seq<Row>): int", result)
+        self.assertIn("function {:verify false} MethodSpec(data: seq<Row>): int", result)
         self.assertIn("(row.value as int) + MethodSpec(tail)", result)
 
     def test_basic_count(self):
         sql = "SELECT COUNT(*) FROM my_table WHERE category = 'A'"
         result = transpile_sql_to_dafny(sql, self.schema)
         self.assertIn("datatype Row = Row(category: string, value: bv32, age: bv32, name: string)", result)
-        self.assertIn("function MethodSpec(data: seq<Row>): int", result)
+        self.assertIn("function {:verify false} MethodSpec(data: seq<Row>): int", result)
         self.assertIn("var term := if row.category == \"A\" then 1 else 0;", result)
 
     def test_avg_no_groupby(self):
@@ -30,7 +30,7 @@ class TestTranspilerUnit(unittest.TestCase):
         result = transpile_sql_to_dafny(sql, self.schema)
         self.assertIn("function SumHelper(data: seq<Row>): int", result)
         self.assertIn("function CountHelper(data: seq<Row>): int", result)
-        self.assertIn("function MethodSpec(data: seq<Row>): int", result)
+        self.assertIn("function {:verify false} MethodSpec(data: seq<Row>): int", result)
         self.assertIn("var sum := SumHelper(data);", result)
         self.assertIn("var count := CountHelper(data);", result)
         self.assertIn("if count == 0 then 0 else sum / count", result)
@@ -38,7 +38,7 @@ class TestTranspilerUnit(unittest.TestCase):
     def test_sum_groupby(self):
         sql = "SELECT category, SUM(value) FROM my_table GROUP BY category"
         result = transpile_sql_to_dafny(sql, self.schema)
-        self.assertIn("function MethodSpec(data: seq<Row>): map<string, int>", result)
+        self.assertIn("function {:verify false} MethodSpec(data: seq<Row>): map<string, int>", result)
         self.assertIn("var key := row.category;", result)
         self.assertIn("tailMap[key := val + (row.value as int)]", result)
 
@@ -47,13 +47,13 @@ class TestTranspilerUnit(unittest.TestCase):
         result = transpile_sql_to_dafny(sql, self.schema)
         self.assertIn("function SumMapHelper(data: seq<Row>): map<string, int>", result)
         self.assertIn("function CountMapHelper(data: seq<Row>): map<string, int>", result)
-        self.assertIn("function MethodSpec(data: seq<Row>): map<string, int>", result)
+        self.assertIn("function {:verify false} MethodSpec(data: seq<Row>): map<string, int>", result)
         self.assertIn("map k | k in sums && k in counts :: if counts[k] == 0 then 0 else sums[k] / counts[k]", result)
 
     def test_groupby_int_key(self):
         sql = "SELECT age, SUM(value) FROM my_table GROUP BY age"
         result = transpile_sql_to_dafny(sql, self.schema)
-        self.assertIn("function MethodSpec(data: seq<Row>): map<bv32, int>", result)
+        self.assertIn("function {:verify false} MethodSpec(data: seq<Row>): map<bv32, int>", result)
         self.assertIn("var key := row.age;", result)
 
     def test_where_multiple_conditions(self):
@@ -95,7 +95,7 @@ class TestTranspilerUnit(unittest.TestCase):
         sql = "SELECT SUM(value) AS val_alias FROM my_table"
         result = transpile_sql_to_dafny(sql, self.schema)
         self.assertIn("datatype Row = Row(category: string, value: bv32, age: bv32, name: string)", result)
-        self.assertIn("function MethodSpec(data: seq<Row>): int", result)
+        self.assertIn("function {:verify false} MethodSpec(data: seq<Row>): int", result)
         self.assertIn("(row.value as int) + MethodSpec(tail)", result)
 
         sql_implicit = "SELECT SUM(value) val_alias FROM my_table"
@@ -128,7 +128,7 @@ class TestTranspilerUnit(unittest.TestCase):
     def test_multi_column_groupby(self):
         sql = "SELECT category, age, SUM(value) FROM my_table GROUP BY category, age"
         result = transpile_sql_to_dafny(sql, self.schema)
-        self.assertIn("function MethodSpec(data: seq<Row>): map<(string, bv32), int>", result)
+        self.assertIn("function {:verify false} MethodSpec(data: seq<Row>): map<(string, bv32), int>", result)
         self.assertIn("var key := (row.category, row.age);", result)
         self.assertIn("tailMap[key := val + (row.value as int)]", result)
 

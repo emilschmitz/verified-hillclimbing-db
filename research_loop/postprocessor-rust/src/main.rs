@@ -126,6 +126,10 @@ struct PostProcessor {
     /// Path to the .tbl file (or anything else dataset.rs knows how to
     /// read) that the harness wants Main to load.
     tbl_path_str: String,
+    /// Set true when the mock-data-loader rewrite actually fired.  Only in
+    /// that case does the output need `mod dataset;` and the `Loadable`
+    /// impl glued in.
+    needs_dataset: bool,
 }
 
 impl VisitMut for PostProcessor {
@@ -149,10 +153,12 @@ impl VisitMut for PostProcessor {
     fn visit_expr_mut(&mut self, expr: &mut Expr) {
         // x = x.update_index(&k, &v)  →  x.insert(k.clone(), v.clone())
         if let Expr::Assign(assign) = expr {
+            let left_expr = &*assign.left;
+            let left_debug = quote!(#left_expr).to_string();
             if let Expr::MethodCall(call) = &*assign.right {
                 if call.method == "update_index" && call.args.len() == 2 {
                     let receiver = &call.receiver;
-                    let left = quote!(#assign.left).to_string().replace(' ', "");
+                    let left = left_debug.replace(' ', "");
                     let rec = quote!(#receiver).to_string().replace(' ', "");
                     if left == rec {
                         let mut k = arg_expr(&call.args[0]);
@@ -178,6 +184,33 @@ impl VisitMut for PostProcessor {
         if let Expr::MethodCall(call) = expr {
             if call.method == "contains" && call.args.len() == 1 {
                 call.method = syn::Ident::new("contains_key", proc_macro2::Span::call_site());
+            }
+        }
+
+        // Map lookup with default:  if m.contains/c.contains_key(&k) { m.get(&k) } else { d }
+        //                          → *m.get(&k).unwrap_or(&d)
+        //   This rewrite both turns a Pythonic guard idiom into a fast
+        //   `unwrap_or`, and — critically — fixes the type mismatch: the
+        //   Dafny compiler emits `HashMap::get(...) -> Option<&V>` and the
+        //   else branch `0 : i32`, which Rust won't accept as an `if/else`
+        //   value pair.  `unwrap_or(&0)` makes both arms `&V`.
+        if let Expr::If(expr_if) = expr {
+            let mut cond = &*expr_if.cond;
+            while let Expr::Paren(p) = cond { cond = &*p.expr; }
+            while let Expr::Group(g) = cond { cond = &*g.expr; }
+            if let Expr::MethodCall(c) = cond {
+                if (c.method == "contains" || c.method == "contains_key") && c.args.len() == 1 {
+                    let map = c.receiver.clone();
+                    let key = c.args[0].clone();
+                    if let Some((_, els)) = &expr_if.else_branch {
+                        let mut m = map; let mut k = key; let mut d = (**els).clone();
+                        self.visit_expr_mut(&mut m);
+                        self.visit_expr_mut(&mut k);
+                        self.visit_expr_mut(&mut d);
+                        *expr = parse_quote!(*#m.get(&#k).unwrap_or(&#d));
+                        return;
+                    }
+                }
             }
         }
 
@@ -245,6 +278,7 @@ impl VisitMut for PostProcessor {
             //     `let mut data: Sequence<Rc<Row>> = []`
             //   → `let mut data = dataset::load_dataset(…)`
             if is_mock_data_decl(&stmt) {
+                self.needs_dataset = true;
                 let p = &self.tbl_path_str;
                 stmt = parse_quote! {
                     let mut data: Sequence<Rc<Row>> = crate::dataset::load_dataset::<Row>(#p, 50000);
@@ -462,23 +496,27 @@ fn main() {
     extractor.visit_file(&syntax);
 
     // 2. apply rewrites
-    let mut proc = PostProcessor { row_var: "row".into(), tbl_path_str: tbl_path };
+    let mut proc = PostProcessor { row_var: "row".into(), tbl_path_str: tbl_path, needs_dataset: false };
     proc.visit_file_mut(&mut syntax);
 
-    // 3. emit glue
+    // 3. emit glue: only if the Main rewrite actually injected a
+    //    `crate::dataset::load_dataset(…)` call.  The unit tests use
+    //    `seq(1, i => Row(...))` instead, so they don't need this.
     let mut out = quote!(#syntax).to_string();
-    // `mod dataset;` has to go *after* the inner attributes (`#![allow(...)]`)
-    // and right before `pub mod _module`.  Inner attributes must be at the
-    // very top of a file/module — placing `mod` ahead of them is a syntax
-    // error.
-    if let Some(pos) = out.find("pub mod _module") {
-        out.insert_str(pos, "mod dataset; ");
-    } else {
-        out = format!("mod dataset;\n{}", out);
-    }
-    if let Some(pos) = out.find("pub enum Row") {
-        if let Some(end) = out[pos..].find("} }") {
-            out.insert_str(pos + end + 3, &build_loadable_impl(&extractor.row_types));
+    if proc.needs_dataset {
+        // `mod dataset;` has to go *after* the inner attributes
+        // (`#![allow(...)]`) and right before `pub mod _module`.  Inner
+        // attributes must be at the very top of a file/module — placing
+        // `mod` ahead of them is a syntax error.
+        if let Some(pos) = out.find("pub mod _module") {
+            out.insert_str(pos, "mod dataset; ");
+        } else {
+            out = format!("mod dataset;\n{}", out);
+        }
+        if let Some(pos) = out.find("pub enum Row") {
+            if let Some(end) = out[pos..].find("} }") {
+                out.insert_str(pos + end + 3, &build_loadable_impl(&extractor.row_types));
+            }
         }
     }
 

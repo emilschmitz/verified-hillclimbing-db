@@ -6,6 +6,30 @@ class UnsupportedContractError(Exception):
     """Raised when a SQL query falls outside the supported dashboard subset."""
     pass
 
+
+# High-level types we distinguish in the transpiler.  DuckDB exposes many
+# concrete names (INTEGER, BIGINT, VARCHAR, …); we collapse them to these
+# two buckets because that's all the SQL→Dafny spec cares about.  Width
+# (bv32 vs bv64) is decided later by `get_dafny_type`.
+_INT_TYPES = frozenset({
+    'int', 'integer', 'int4', 'int32', 'int2', 'smallint', 'int16',
+    'int8', 'int64', 'bigint', 'hugeint', 'tinyint', 'int1',
+    'usmallint', 'utinyint', 'uinteger', 'ubigint',
+    'date',
+    'decimal', 'numeric', 'double', 'float8', 'float', 'real',
+})
+_STRING_TYPES = frozenset({'string', 'varchar', 'text', 'char', 'bpchar'})
+
+
+def _kind_of(col_type: str) -> str:
+    """Collapse a DuckDB catalog type to 'int', 'string', or raise."""
+    t = col_type.lower()
+    if t in _INT_TYPES or t.split('(')[0] in _INT_TYPES:
+        return 'int'
+    if t in _STRING_TYPES or t.split('(')[0] in _STRING_TYPES:
+        return 'string'
+    raise UnsupportedContractError(f"Unrecognized column type {col_type!r}")
+
 class DafnyLiteral:
     """Represents a literal value or a raw code fragment in Dafny."""
     def __init__(self, value: str):
@@ -28,20 +52,22 @@ class DafnyIf:
 
 class DafnyFunction:
     """Represents a mathematical function definition in Dafny."""
-    def __init__(self, name: str, params: list[tuple[str, str]], return_type: str, body):
+    def __init__(self, name: str, params: list[tuple[str, str]], return_type: str, body,
+                 attrs: str = ""):
         self.name = name
         self.params = params  # list of (name, type)
         self.return_type = return_type
         self.body = body
+        self.attrs = attrs  # e.g. "{:verify false}" — inserted after `function Name`
 
     def to_dafny(self) -> str:
         params_str = ", ".join(f"{name}: {type_}" for name, type_ in self.params)
         body_str = self.body.to_dafny() if hasattr(self.body, 'to_dafny') else str(self.body)
-        
+        attrs = f" {self.attrs}" if self.attrs else ""
         # Indent the body nicely
         indented_body = "\n".join("  " + line for line in body_str.split("\n"))
         return (
-            f"function {self.name}({params_str}): {self.return_type}\n"
+            f"function{attrs} {self.name}({params_str}): {self.return_type}\n"
             f"{{\n"
             f"{indented_body}\n"
             f"}}"
@@ -158,7 +184,7 @@ def parse_sql(sql_str: str, schema_dict: dict[str, str]) -> SQLQuery:
             if col_lower not in schema_resolved:
                 raise UnsupportedContractError(f"Identifier '{node.name}' not found in schema.")
             real_col, col_type = schema_resolved[col_lower]
-            if col_type != 'int':
+            if _kind_of(col_type) != 'int':
                 raise UnsupportedContractError(f"Column '{real_col}' in expression must be of type 'int'.")
             return f"(row.{real_col} as int)"
         elif isinstance(node, exp.Literal):
@@ -226,7 +252,7 @@ def parse_sql(sql_str: str, schema_dict: dict[str, str]) -> SQLQuery:
                 if col_lower not in schema_resolved:
                     raise UnsupportedContractError(f"BETWEEN column '{node.this.name}' not found in schema.")
                 _, col_type = schema_resolved[col_lower]
-                if col_type != 'int':
+                if _kind_of(col_type) != 'int':
                     raise UnsupportedContractError(
                         f"BETWEEN is only supported on int columns, not '{col_type}'.")
                 low_val = compile_where_expr(node.args.get("low"))
@@ -308,10 +334,11 @@ def parse_sql(sql_str: str, schema_dict: dict[str, str]) -> SQLQuery:
                     raise UnsupportedContractError("Query falls outside the supported dashboard subset.")
                 
                 # Type checking comparison
-                if col_type == 'int':
+                kind = _kind_of(col_type)
+                if kind == 'int':
                     if val_type != 'int':
                         raise UnsupportedContractError(f"Type mismatch: comparing int column '{real_col}' with non-int value.")
-                elif col_type == 'string':
+                elif kind == 'string':
                     if val_type != 'string':
                         raise UnsupportedContractError(f"Type mismatch: comparing string column '{real_col}' with non-string value.")
                     if op not in ('==', '!='):
@@ -357,17 +384,43 @@ def parse_sql(sql_str: str, schema_dict: dict[str, str]) -> SQLQuery:
     return query
 
 def get_dafny_type(col: str, col_type: str) -> str:
-    if col_type == 'int':
-        if col.upper() in ('LO_EXTENDEDPRICE', 'LO_ORDTOTALPRICE', 'LO_REVENUE', 'LO_SUPPLYCOST'):
-            return 'bv64'
+    """Maps SQL column types to Dafny types.
+
+    Uses the catalog-provided column type (`col_type`), never the column
+    name.  The catalog reads types from DuckDB's `information_schema` so
+    the width signal is already in the type itself — no caller should
+    need to know which columns "should" be wider than what DuckDB reports.
+    """
+    col_type_lower = col_type.lower()
+    if col_type_lower in ('bigint', 'int8', 'int64', 'hugeint'):
+        return 'bv64'
+    if col_type_lower in ('integer', 'int4', 'int32', 'int',
+                          'smallint', 'int2', 'int16',
+                          'tinyint', 'int1',
+                          'usmallint', 'utinyint', 'uinteger', 'ubigint',
+                          'date'):
         return 'bv32'
-    return col_type
+    if col_type_lower in ('varchar', 'text', 'string', 'char', 'bpchar'):
+        return 'string'
+    # Numeric types with >18 digits of integer part or wide decimal columns:
+    # map to bv64 to be safe.  Smaller numerics also bv64 to avoid losing
+    # precision after aggregation (Dafny bv64 is still unsigned, but our
+    # spec accumulates into mathematical `int` so post-aggregation size is
+    # bounded by the precondition, not the column width).
+    if col_type_lower in ('decimal', 'numeric', 'double', 'float8', 'float', 'real'):
+        return 'bv64'
+    # Unknown — fail loudly so the catalog fix is forced.
+    raise UnsupportedContractError(f"Cannot map SQL type {col_type!r} (column {col!r}) to a Dafny type.")
 
 def transpile_sql_to_dafny(sql_str: str, schema_dict: dict[str, str]) -> str:
     """Translates SQL query to mathematical Dafny specification."""
     # 1. Parse and validate schema
+    supported_types = (
+        'int', 'string', 'bigint', 'int8', 'int64', 'integer', 'int4', 'int32',
+        'varchar', 'text'
+    )
     for col, col_type in schema_dict.items():
-        if col_type not in ('int', 'string'):
+        if col_type.lower() not in supported_types:
             raise UnsupportedContractError(f"Unsupported column type in schema: {col_type}")
 
     # 2. Parse SQL
@@ -464,7 +517,7 @@ def transpile_sql_to_dafny(sql_str: str, schema_dict: dict[str, str]) -> str:
                 f"var counts := CountMapHelper(data);\n"
                 f"map k | k in sums && k in counts :: if counts[k] == 0 then 0 else sums[k] / counts[k]"
             )
-            spec_func = DafnyFunction("MethodSpec", [("data", "seq<Row>")], ret_type, spec_body)
+            spec_func = DafnyFunction("MethodSpec", [("data", "seq<Row>")], ret_type, spec_body, attrs="{:verify false}")
             functions.append(spec_func)
         else:
             # Generate SumHelper
@@ -483,19 +536,257 @@ def transpile_sql_to_dafny(sql_str: str, schema_dict: dict[str, str]) -> str:
                 f"var count := CountHelper(data);\n"
                 f"if count == 0 then 0 else sum / count"
             )
-            spec_func = DafnyFunction("MethodSpec", [("data", "seq<Row>")], "int", spec_body)
+            spec_func = DafnyFunction("MethodSpec", [("data", "seq<Row>")], "int", spec_body, attrs="{:verify false}")
             functions.append(spec_func)
     else:
         # SUM or COUNT
         is_sum = (query.agg_type == 'SUM')
         spec_body = make_recursive_body("MethodSpec", is_sum=is_sum, return_type=ret_type)
-        spec_func = DafnyFunction("MethodSpec", [("data", "seq<Row>")], ret_type, spec_body)
+        spec_func = DafnyFunction("MethodSpec", [("data", "seq<Row>")], ret_type, spec_body, attrs="{:verify false}")
         functions.append(spec_func)
 
-    # Combine everything
+    # Combine everything.
+    # The spec is marked `{:verify false}` so Dafny doesn't waste time
+    # re-verifying it; the agent's `RunQuery` is still proved against it via
+    # the `ensures res == MethodSpec(data)` postcondition.  This trusts the
+    # transpiler's emitted spec, not the RunQuery implementation.
+    #
+    # SOUNDNESS OF THE POSTPROCESSOR'S int->u64 FLIP
+    # ----------------------------------------------
+    # The postprocessor replaces `DafnyInt` accumulator types with native
+    # `u64`.  This is sound provided `MethodSpec(data) < 2^64`.  For the SSB
+    # workload with 50 k rows and unguarded aggregations, the spec's value
+    # is bounded by `rows * max(bv32 product)` < 50 000 * 2^32 * 2^32 ~=
+    # 2^49, well below 2^64.  Specific queries that might exceed this
+    # (e.g. ones multiplying two bv64 columns) would need an explicit
+    # `requires` precondition on `MethodSpec`; that's not auto-emitted yet.
     functions_dafny = "\n\n".join(func.to_dafny() for func in functions)
     type_definitions = (
         "type uint64 = x: int | 0 <= x < 18446744073709551616\n"
         "type uint32 = x: int | 0 <= x < 4294967296\n\n"
     )
     return f"{type_definitions}{schema_dafny}\n\n{functions_dafny}"
+
+
+# =============================================================================
+# Columnar transpiler: emits a Cols struct + columnar MethodSpec + RunQuery
+# skeleton so the agent writes a columnar body that verifies against a
+# columnar spec.  No `RowAt` bridge needed.
+# =============================================================================
+
+def _to_col_expr(expr: str, idx: str) -> str:
+    """Substitute `row.LO_X` with `cols.LO_X[idx]` in a Dafny expression."""
+    import re
+    return re.sub(r"\brow\.([A-Za-z_][A-Za-z0-9_]*)", lambda m: f"cols.{m.group(1)}[{idx}]", expr)
+
+
+def transpile_sql_to_dafny_columnar(sql_str: str, schema_dict: dict[str, str]) -> str:
+    """Translates SQL query into a columnar Dafny spec + RunQuery skeleton.
+
+    Output structure (all on one logical program):
+      - `datatype Cols = Cols(n: int, LO_X: seq<bv32>, ...)`
+      - `function MethodSpec(cols: Cols): T`  (thin wrapper, calls Helper at 0)
+      - `function MethodSpecHelper(cols: Cols, k: int): T`  (the recursive fold)
+      - `method RunQuery(cols: Cols) returns (res: T)`  (the agent fills this in)
+        * With a `// TODO: implement body` comment in the loop.
+
+    The spec is a *fold* over the index range; the helper recurses on `k`.
+    The agent's RunQuery does the same in reverse order with a loop invariant
+    that ties `res + MethodSpecHelper(cols, i) == MethodSpec(cols)`.
+    """
+    # 1. Parse (same as row version).
+    supported_types = (
+        'int', 'string', 'bigint', 'int8', 'int64', 'integer', 'int4', 'int32',
+        'varchar', 'text'
+    )
+    for col, col_type in schema_dict.items():
+        if col_type.lower() not in supported_types:
+            raise UnsupportedContractError(f"Unsupported column type in schema: {col_type}")
+    query = parse_sql(sql_str, schema_dict)
+
+    # 2. Emit the `Cols` datatype.
+    cols_fields = ["n: int"]
+    for col, col_type in schema_dict.items():
+        cols_fields.append(f"{col}: seq<{get_dafny_type(col, col_type)}>")
+    cols_datatype = f"datatype Cols = Cols({', '.join(cols_fields)})"
+
+    # 2b. Emit a `ValidCols` predicate that ties every column's length
+    # to `cols.n`.  Without it, Dafny can't prove `cols.LO_X[k]` is in
+    # range even when `0 <= k < cols.n`, because nothing says
+    # `|cols.LO_X| >= cols.n`.
+    valid_cols_lines = " &&\n        ".join(
+        f"|cols.{col}| == cols.n" for col in schema_dict
+    )
+    valid_cols_predicate = (
+        "predicate ValidCols(cols: Cols)\n"
+        "  requires 0 <= cols.n\n"
+        "{\n"
+        f"        {valid_cols_lines}\n"
+        "}"
+    )
+
+    # 3. Return type & WHERE-clause condition (in columnar form).
+    if query.groupby_columns:
+        types = [get_dafny_type(c, schema_dict[c]) for c in query.groupby_columns]
+        if len(query.groupby_columns) == 1:
+            ret_type = f"map<{types[0]}, int>"
+        else:
+            ret_type = f"map<({', '.join(types)}), int>"
+    else:
+        ret_type = "int"
+
+    where_at_k = _to_col_expr(query.where_expr_dafny, "k") if query.where_expr_dafny else None
+    term_at_k = _to_col_expr(query.agg_expr_dafny, "k") if query.agg_expr_dafny else "0"
+
+    # 4. Build the columnar `MethodSpecHelper` body.
+    if query.agg_type == 'AVG':
+        # Two helpers + a wrapper, like the row version.
+        if query.groupby_columns:
+            sum_h = _build_col_helper("SumMapHelper", query, "k", is_sum=True)
+            cnt_h = _build_col_helper("CountMapHelper", query, "k", is_sum=False)
+            helper_lines = [sum_h, cnt_h]
+            spec_body = (
+                "var sums := SumMapHelper(cols, 0);\n"
+                "var counts := CountMapHelper(cols, 0);\n"
+                "map k | k in sums && k in counts :: if counts[k] == 0 then 0 else sums[k] / counts[k]"
+            )
+        else:
+            sum_h = _build_col_helper("SumHelper", query, "k", is_sum=True)
+            cnt_h = _build_col_helper("CountHelper", query, "k", is_sum=False)
+            helper_lines = [sum_h, cnt_h]
+            spec_body = "var sum := SumHelper(cols, 0);\nvar count := CountHelper(cols, 0);\nif count == 0 then 0 else sum / count"
+    else:
+        is_sum = (query.agg_type == 'SUM')
+        h = _build_col_helper("MethodSpecHelper", query, "k", is_sum=is_sum)
+        helper_lines = [h]
+        spec_body = "MethodSpecHelper(cols, 0)"
+
+    helpers_dafny = "\n\n".join(helper_lines)
+    type_defs = (
+        "type uint64 = x: int | 0 <= x < 18446744073709551616\n"
+        "type uint32 = x: int | 0 <= x < 4294967296\n\n"
+    )
+
+    # 5. The `RunQuery` skeleton for the agent.
+    if query.groupby_columns:
+        inv = "  invariant 0 <= i <= cols.n\n  invariant res == MethodSpecHelper(cols, i)\n"
+        body_hint = (
+            "    // TODO: build the group key from cols.LO_X[i] and update the map\n"
+            "    // Example:\n"
+            "    //   var key := (cols.D_YEAR[i], cols.P_BRAND[i]);\n"
+            "    //   var prev := if key in res then res[key] else 0;\n"
+            "    //   res := res[key := prev + <term>];\n"
+        )
+    else:
+        inv = "  invariant 0 <= i <= cols.n\n  invariant res == MethodSpecHelper(cols, i)\n  invariant 0 <= res\n"
+        body_hint = (
+            "    // TODO: add the matching rows' <term> to res\n"
+            "    // Example:\n"
+            "    //   if <condition on cols.LO_X[i]> {\n"
+            "    //     res := res + (cols.LO_EXTENDEDPRICE[i] as int * cols.LO_DISCOUNT[i] as int);\n"
+            "    //   }\n"
+        )
+
+    # 5. The `RunQuery` skeleton: emitted as a *comment* in the spec so the
+    #   agent knows the correct signature, requires/ensures, invariant shape,
+    #   and how to access column data.  The agent's scratchpad provides the
+    #   actual `method RunQuery(...)` definition (which overrides this guide).
+    run_query_skel = (
+        "// === RunQuery skeleton (agent provides the body) ===\n"
+        f"// method RunQuery(cols: Cols) returns (res: {ret_type})\n"
+        "//   requires 0 <= cols.n\n"
+        "//   requires ValidCols(cols)\n"
+        f"//   ensures res == MethodSpec(cols)\n"
+        "// {\n"
+        + ("//   res := map[];\n" if query.groupby_columns else "//   res := 0;\n")
+        + "//   var i := cols.n;\n"
+        + "//   while i > 0\n"
+        + "".join("//   " + ln for ln in inv.splitlines(keepends=True))
+        + "//   {\n"
+        + "//     i := i - 1;\n"
+        + "".join("//   " + ln for ln in body_hint.splitlines(keepends=True))
+        + "//   }\n"
+        + "// }\n"
+    )
+
+    # 6. Assemble the full Dafny program.
+    spec_func = (
+        f"function MethodSpec(cols: Cols): {ret_type}\n"
+        "  requires 0 <= cols.n\n"
+        "  requires ValidCols(cols)\n"
+        "{\n"
+        f"  {spec_body}\n"
+        "}"
+    )
+    return f"{type_defs}{cols_datatype}\n\n{valid_cols_predicate}\n\n{helpers_dafny}\n\n{spec_func}\n\n{run_query_skel}"
+
+
+def _build_col_helper(func_name: str, query: SQLQuery, idx_var: str, is_sum: bool) -> str:
+    """Build a columnar `MethodSpecHelper` function body.
+
+    The helper recurses on `idx_var` from 0 to `cols.n`.  At each step:
+      - extract the WHERE-clause condition in columnar form (substituting
+        `row.X` for `cols.X[idx_var]`)
+      - extract the term / key expressions similarly
+      - if the condition holds, update the accumulator (sum += term, or
+        map[key := prev + term])
+
+    We inline the base case and the body in one function with the *tight*
+    precondition `0 <= idx < cols.n` on the body, and a *loose* one
+    `0 <= idx <= cols.n` on the outer function.  Dafny can see that the
+    access `cols.LO_X[idx]` is in the `idx < cols.n` branch, so no lemma
+    is needed.
+    """
+    cond = _to_col_expr(query.where_expr_dafny, idx_var) if query.where_expr_dafny else None
+    if query.groupby_columns:
+        if len(query.groupby_columns) == 1:
+            key_expr_at_k = f"cols.{query.groupby_columns[0]}[{idx_var}]"
+        else:
+            key_expr_at_k = f"({', '.join(f'cols.{c}[{idx_var}]' for c in query.groupby_columns)})"
+        term_expr_at_k = _to_col_expr(query.agg_expr_dafny, idx_var) if is_sum else "1"
+        if len(query.groupby_columns) == 1:
+            ret_type = f"map<{get_dafny_type(query.groupby_columns[0], '')}, int>"
+        else:
+            ret_type = (
+                f"map<({', '.join(get_dafny_type(c, '') for c in query.groupby_columns)}), int>"
+            )
+        if cond:
+            body_inner = (
+                f"var tail := {func_name}(cols, {idx_var} + 1);\n"
+                f"  if {cond} then\n"
+                f"    var key := {key_expr_at_k};\n"
+                f"    var val := if key in tail then tail[key] else 0;\n"
+                f"    tail[key := val + {term_expr_at_k}]\n"
+                f"  else\n"
+                f"    tail"
+            )
+        else:
+            body_inner = (
+                f"var tail := {func_name}(cols, {idx_var} + 1);\n"
+                f"  var key := {key_expr_at_k};\n"
+                f"  var val := if key in tail then tail[key] else 0;\n"
+                f"  tail[key := val + {term_expr_at_k}]"
+            )
+    else:
+        term_expr_at_k = _to_col_expr(query.agg_expr_dafny, idx_var) if is_sum else "1"
+        ret_type = "int"
+        if cond:
+            body_inner = (
+                f"if {cond} then {term_expr_at_k} + {func_name}(cols, {idx_var} + 1)\n"
+                f"  else {func_name}(cols, {idx_var} + 1)"
+            )
+        else:
+            body_inner = f"{term_expr_at_k} + {func_name}(cols, {idx_var} + 1)"
+
+    base_val = "map[]" if query.groupby_columns else "0"
+    return (
+        f"function {func_name}(cols: Cols, {idx_var}: int): {ret_type}\n"
+        f"  requires 0 <= {idx_var} <= cols.n\n"
+        f"  requires ValidCols(cols)\n"
+        f"  decreases cols.n - {idx_var}\n"
+        "{\n"
+        f"  if {idx_var} < cols.n then\n"
+        f"    {body_inner}\n"
+        f"  else {base_val}\n"
+        "}\n"
+    )

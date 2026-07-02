@@ -16,6 +16,18 @@
 # ==============================================================================
 from sql_transpiler import transpile_sql_to_dafny
 
+# Concrete DuckDB data_type mappings for the hardcoded SSB schema fallback.
+# Used only by `db_extension/catalog.py:get_table_schema` when no live
+# DuckDB connection exists.  Anything not in this map defaults to INTEGER,
+# which Dafny compiles to bv32.  Wide metrics that can exceed 2^32 after
+# multiplication/aggregation are marked BIGINT (bv64).
+fallback_dtypes = {
+    "LO_EXTENDEDPRICE": "BIGINT",
+    "LO_ORDTOTALPRICE": "BIGINT",
+    "LO_REVENUE": "BIGINT",
+    "LO_SUPPLYCOST": "BIGINT",
+}
+
 schema = {
     "LO_ORDERKEY": "int",
     "LO_LINENUMBER": "int",
