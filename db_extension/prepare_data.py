@@ -26,6 +26,7 @@ def main():
     # 2. Write initialization SQL script for the C++ CLI using the real table
     with open(init_sql_path, "w") as f:
         f.write(".prompt \"\\033[92mhillclimbing\\033[0m> \"\n")
+        f.write(".timer on\n")
         f.write("SET allow_extensions_metadata_mismatch=true;\n")
         f.write("LOAD 'build/hillclimbing.duckdb_extension';\n")
         f.write(f"CREATE TABLE IF NOT EXISTS lineorder_flat AS SELECT * FROM read_csv('{tbl_path}', delim='|', header=True) LIMIT 50000;\n")

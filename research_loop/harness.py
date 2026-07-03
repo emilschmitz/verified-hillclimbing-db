@@ -115,14 +115,23 @@ def main():
             "compiler_error": f"Invalid query index. Choose 1 to {len(queries)}.",
             "transpile_time_ms": -1,
             "verification_time_ms": -1,
-            "compilation_time_ms": -1
+            "compilation_time_ms": -1,
+            "admit_time_ms": -1,
+            "postprocess_time_ms": -1,
+            "codegen_time_ms": -1,
+            "cargo_time_ms": -1,
         }))
         sys.exit(1)
 
     # Global timings to be reported on exit
     transpile_time_ms = -1
+    admit_time_ms = -1
     verify_time_ms = -1
+    postprocess_time_ms = -1
+    codegen_time_ms = -1
+    cargo_time_ms = -1
     compile_time_ms = -1
+    admit_ok = True
 
     def exit_with_metrics(status, proof_verified, latency_us, compiler_error):
         print(json.dumps({
@@ -131,8 +140,13 @@ def main():
             "latency_us": latency_us,
             "compiler_error": compiler_error,
             "transpile_time_ms": transpile_time_ms,
+            "admit_time_ms": admit_time_ms,
+            "admit_ok": admit_ok,
             "verification_time_ms": verify_time_ms,
-            "compilation_time_ms": compile_time_ms
+            "postprocess_time_ms": postprocess_time_ms,
+            "codegen_time_ms": codegen_time_ms,
+            "cargo_time_ms": cargo_time_ms,
+            "compilation_time_ms": compile_time_ms,
         }, indent=2))
         sys.exit(0)
 
@@ -198,7 +212,10 @@ method {:verify false} Main() {
 
     from research_loop.admit_runquery import admit_runquery
     log_debug(COMPONENT, "admit_start", "RunQuery admission gate")
+    start_admit = time.perf_counter()
     admission = admit_runquery(full_source)
+    admit_time_ms = int((time.perf_counter() - start_admit) * 1000)
+    admit_ok = admission.ok
     log_info(
         COMPONENT,
         "admit_done",
@@ -245,7 +262,7 @@ method {:verify false} Main() {
     stable_rust_dir = os.path.join(CURRENT_DIR, "working_query-rust")
     temp_rust_dir = os.path.join(temp_build_dir, "working_query-rust")
 
-    start_compile = time.perf_counter()
+    start_codegen = time.perf_counter()
     log_debug(COMPONENT, "codegen_start", "dafny translate rs (columnar)")
     build_cmd = dafny_translate_cmd(working_dfy_path, temp_build_dir, schema)
 
@@ -257,16 +274,12 @@ method {:verify false} Main() {
             text=True,
             timeout=compile_timeout,
         )
-        log_info(
-            COMPONENT,
-            "codegen_done",
-            f"{int((time.perf_counter() - start_compile) * 1000)}ms",
-            ok=build_res.returncode == 0,
-        )
+        codegen_time_ms = int((time.perf_counter() - start_codegen) * 1000)
         if build_res.returncode != 0:
             error_msg = build_res.stdout + "\n" + build_res.stderr
             shutil.rmtree(temp_build_dir, ignore_errors=True)
             exit_with_metrics("FAILURE", True, -1, f"Dafny translate (codegen) failed:\n{error_msg.strip()}")
+        log_info(COMPONENT, "codegen_done", f"{codegen_time_ms}ms", ok=True)
     except subprocess.TimeoutExpired:
         shutil.rmtree(temp_build_dir, ignore_errors=True)
         exit_with_metrics("FAILURE", True, -1, f"Dafny translate timed out after {compile_timeout} seconds.")
@@ -285,6 +298,7 @@ method {:verify false} Main() {
 
     # 6c. Postprocess + hot-loop benchmark main
     log_debug(COMPONENT, "postprocess_start", "optimize_rust_file", fast_agg=admission.allow_fast_native_agg)
+    start_post = time.perf_counter()
     try:
         from research_loop.postprocessor import inject_hot_loop_main, postprocess
         postprocess(
@@ -296,13 +310,15 @@ method {:verify false} Main() {
         inject_hot_loop_main(rust_src, tbl_path, args.dataset_size)
     except Exception as e:
         exit_with_metrics("FAILURE", True, -1, f"Custom u64 Rust optimization pass failed: {e}")
+    postprocess_time_ms = int((time.perf_counter() - start_post) * 1000)
     log_debug(COMPONENT, "postprocess_done", "optimize_rust_file + hot loop main")
 
     # 7. Native Compilation using Cargo (Release Mode)
     cargo_toml_path = os.path.join(stable_rust_dir, "Cargo.toml")
     log_debug(COMPONENT, "cargo_start", "cargo build --release", manifest=cargo_toml_path)
     cargo_cmd = ["cargo", "build", "--release", "--manifest-path", cargo_toml_path]
-    
+    start_cargo = time.perf_counter()
+
     try:
         env = os.environ.copy()
         env["RUSTFLAGS"] = "-C target-cpu=native"
@@ -313,13 +329,15 @@ method {:verify false} Main() {
             timeout=compile_timeout,
             env=env
         )
-        compile_time_ms = int((time.perf_counter() - start_compile) * 1000)
-        log_info(COMPONENT, "cargo_done", f"{compile_time_ms}ms", ok=cargo_res.returncode == 0)
+        cargo_time_ms = int((time.perf_counter() - start_cargo) * 1000)
+        compile_time_ms = codegen_time_ms + cargo_time_ms
+        log_info(COMPONENT, "cargo_done", f"{cargo_time_ms}ms", ok=cargo_res.returncode == 0)
         if cargo_res.returncode != 0:
             error_msg = cargo_res.stdout + "\n" + cargo_res.stderr
             exit_with_metrics("FAILURE", True, -1, f"Cargo release build failed:\n{error_msg.strip()}")
     except subprocess.TimeoutExpired:
-        compile_time_ms = int((time.perf_counter() - start_compile) * 1000)
+        cargo_time_ms = int((time.perf_counter() - start_cargo) * 1000)
+        compile_time_ms = codegen_time_ms + cargo_time_ms
         exit_with_metrics("FAILURE", True, -1, f"Cargo build timed out after {compile_timeout} seconds.")
 
     # 8. Execution and Latency Profiling

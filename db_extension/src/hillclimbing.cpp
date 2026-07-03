@@ -40,36 +40,22 @@ static void HillclimbingOptimize(duckdb_function_info info, duckdb_data_chunk in
         std::string cmd = "uv run python -m db_extension.run_optimizer --file " + temp_sql_path + " 2>&1";
         
         // Execute popen and stream output
-        std::string output_str = "";
         char buffer[1024];
         FILE* pipe = popen(cmd.c_str(), "r");
+        int exit_code = -1;
         if (pipe) {
             while (fgets(buffer, sizeof(buffer), pipe) != nullptr) {
                 // Print live to standard out of the DuckDB CLI process
                 std::cout << buffer << std::flush;
-                
-                // Track execution time from stdout
-                std::string line(buffer);
-                if (line.find("Executed in") != std::string::npos) {
-                    output_str = line;
-                }
             }
-            pclose(pipe);
+            exit_code = pclose(pipe);
         }
-        
+
         // Cleanup temp file
         remove(temp_sql_path.c_str());
-        
-        if (output_str.empty()) {
-            output_str = "Hillclimbing query optimization run completed.";
-        }
-        
-        // Trim trailing newlines
-        while (!output_str.empty() && (output_str.back() == '\n' || output_str.back() == '\r')) {
-            output_str.pop_back();
-        }
-        
-        // Assign result back to DuckDB result vector
+
+        // Side effects (demo steps + result table) are on stdout; return empty on success.
+        std::string output_str = (exit_code == 0) ? "" : "Hillclimbing optimization failed.";
         duckdb_vector_assign_string_element(output, row, output_str.c_str());
     }
 }

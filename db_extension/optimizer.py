@@ -7,6 +7,17 @@ import time
 from sql_transpiler import transpile_sql_to_dafny_columnar
 from research_loop.ssb_workload import queries, schema
 from research_loop.pipeline_log import log_debug, log_info, log_trace, log_warn
+from research_loop.pipeline_demo import (
+    demo_enabled,
+    demo_execute,
+    demo_from_harness_metrics,
+    demo_iteration,
+    demo_note,
+    demo_step_done,
+    demo_step_pass_fail,
+    demo_banner,
+    verbose_enabled,
+)
 
 COMPONENT = "optimizer"
 
@@ -17,6 +28,11 @@ COLOR_YELLOW = "\033[93m"
 COLOR_BLUE = "\033[94m"
 COLOR_CYAN = "\033[96m"
 COLOR_RESET = "\033[0m"
+
+
+def _vprint(*args, **kwargs) -> None:
+    if verbose_enabled() or not demo_enabled():
+        print(*args, **kwargs)
 
 def match_query_index(sql_query: str) -> int:
     """
@@ -213,7 +229,11 @@ def run_optimization_loop(sql_query: str, dataset_size: int = 50000, max_iterati
     root_dir = os.path.dirname(current_dir)
     scratchpad_path = os.path.join(root_dir, "research_loop", "agent_scratchpad.md")
 
-    print(f"{COLOR_CYAN}--- Starting verified-hillclimbing optimizer for Query {query_id} ---{COLOR_RESET}")
+    if demo_enabled():
+        agent_label = "mock fixture" if use_mock else "Composer agent"
+        demo_banner(f"Hillclimbing optimizer · Q{query_id} · {agent_label}")
+    else:
+        _vprint(f"{COLOR_CYAN}--- Starting verified-hillclimbing optimizer for Query {query_id} ---{COLOR_RESET}")
     
     best_latency = -1
     best_iteration = -1
@@ -223,32 +243,44 @@ def run_optimization_loop(sql_query: str, dataset_size: int = 50000, max_iterati
 
     for iteration in range(1, max_iterations + 1):
         log_info(COMPONENT, "iteration_start", f"iter={iteration}/{max_iterations}")
-        print(f"\n{COLOR_BLUE}Iteration {iteration}:{COLOR_RESET}")
+        if demo_enabled():
+            demo_iteration(iteration, max_iterations)
+        else:
+            _vprint(f"\n{COLOR_BLUE}Iteration {iteration}:{COLOR_RESET}")
 
         # Step 1: Transpile SQL
         log_debug(COMPONENT, "transpile_start", "sql_transpiler")
-        print("  - Transpiling SQL query to formal Daphne spec...", end="", flush=True)
+        _vprint("  - Transpiling SQL query to formal Daphne spec...", end="", flush=True)
         t_start = time.perf_counter()
         try:
             dafny_spec = transpile_sql_to_dafny_columnar(sql_query, schema)
             ms = int((time.perf_counter() - t_start) * 1000)
             log_debug(COMPONENT, "transpile_done", f"{ms}ms", spec_bytes=len(dafny_spec))
-            print(f" {COLOR_GREEN}OK{COLOR_RESET} ({ms} ms)")
+            if demo_enabled():
+                demo_step_done("🏗️", "Transpiling query into Dafny spec", ms)
+            else:
+                _vprint(f" {COLOR_GREEN}OK{COLOR_RESET} ({ms} ms)")
         except Exception as e:
-            print(f" {COLOR_RED}FAILED{COLOR_RESET}")
-            print(f"    Error: {e}")
+            _vprint(f" {COLOR_RED}FAILED{COLOR_RESET}")
+            _vprint(f"    Error: {e}")
             return {"status": "FAILED", "error": f"Transpilation failed: {e}"}
 
         # Step 2: Write agent code
-        print("  - Writing optimized query in Daphne...", end="", flush=True)
+        _vprint("  - Writing optimized query in Daphne...", end="", flush=True)
+        write_ms = 0
         if use_mock:
             try:
+                w_start = time.perf_counter()
                 agent_body_path = os.path.join(root_dir, "research_loop", "agent_workspace", "runquery_agent.dfy")
                 write_mock_agent_body(query_id, agent_body_path)
-                print(f" {COLOR_GREEN}OK{COLOR_RESET} (Mock Agent, columnar fixture Q{query_id})")
+                write_ms = int((time.perf_counter() - w_start) * 1000)
+                if demo_enabled():
+                    demo_step_done("🧑‍💻", "Writing optimized implementation", write_ms, detail="mock")
+                else:
+                    _vprint(f" {COLOR_GREEN}OK{COLOR_RESET} (Mock Agent, columnar fixture Q{query_id})")
             except Exception as e:
-                print(f" {COLOR_RED}FAILED{COLOR_RESET} (Mock generation failed)")
-                print(f"    Error: {e}")
+                _vprint(f" {COLOR_RED}FAILED{COLOR_RESET} (Mock generation failed)")
+                _vprint(f"    Error: {e}")
                 return {"status": "FAILED", "error": f"Mock generation failed: {e}"}
         else:
             from pathlib import Path
@@ -269,17 +301,17 @@ def run_optimization_loop(sql_query: str, dataset_size: int = 50000, max_iterati
                 image = cfg.get("AGENT_IMAGE", "verified-hillclimbing-agent:latest")
                 if not docker_image_built(image):
                     log_info(COMPONENT, "docker_build_start", f"building {image}")
-                    print(f"  - Building agent Docker image {image}...", end="", flush=True)
+                    _vprint(f"  - Building agent Docker image {image}...", end="", flush=True)
                     try:
                         build_docker_image(image)
-                        print(f" {COLOR_GREEN}OK{COLOR_RESET}")
+                        _vprint(f" {COLOR_GREEN}OK{COLOR_RESET}")
                     except Exception as e:
-                        print(f" {COLOR_RED}FAILED{COLOR_RESET}")
+                        _vprint(f" {COLOR_RED}FAILED{COLOR_RESET}")
                         return {"status": "FAILED", "error": f"Docker image build failed: {e}"}
-                print("  - Running agent in Docker sandbox...", end="", flush=True)
+                _vprint("  - Running agent in Docker sandbox...", end="", flush=True)
             else:
                 log_info(COMPONENT, "agent_local", "subprocess AGENT_CMD", workspace=str(workspace))
-                print("  - Running agent (local subprocess)...", end="", flush=True)
+                _vprint("  - Running agent (local subprocess)...", end="", flush=True)
 
             a_start = time.perf_counter()
             try:
@@ -296,8 +328,12 @@ def run_optimization_loop(sql_query: str, dataset_size: int = 50000, max_iterati
                 log_trace(COMPONENT, "agent_body_preview", body[:200])
                 if proc.returncode != 0:
                     err = (proc.stderr or proc.stdout or "agent exited non-zero").strip()
-                    print(f" {COLOR_RED}FAILED{COLOR_RESET}")
-                    print(f"    {err[:500]}")
+                    write_ms = int((time.perf_counter() - a_start) * 1000)
+                    if demo_enabled():
+                        demo_step_pass_fail("🧑‍💻", "Writing optimized implementation", write_ms, False)
+                    else:
+                        _vprint(f" {COLOR_RED}FAILED{COLOR_RESET}")
+                        _vprint(f"    {err[:500]}")
                     history.append({
                         "iteration": iteration,
                         "status": "FAILURE",
@@ -306,9 +342,15 @@ def run_optimization_loop(sql_query: str, dataset_size: int = 50000, max_iterati
                         "error": f"Agent failed: {err}",
                     })
                     continue
-                print(f" {COLOR_GREEN}OK{COLOR_RESET} ({int(time.perf_counter() - a_start)} s)")
+                write_ms = int((time.perf_counter() - a_start) * 1000)
+                if demo_enabled():
+                    demo_step_done("🧑‍💻", "Writing optimized implementation", write_ms)
+                else:
+                    _vprint(f" {COLOR_GREEN}OK{COLOR_RESET} ({write_ms // 1000} s)")
             except subprocess.TimeoutExpired:
-                print(f" {COLOR_RED}TIMEOUT{COLOR_RESET}")
+                if demo_enabled():
+                    demo_step_pass_fail("🧑‍💻", "Writing optimized implementation", int((time.perf_counter() - a_start) * 1000), False)
+                _vprint(f" {COLOR_RED}TIMEOUT{COLOR_RESET}")
                 history.append({
                     "iteration": iteration,
                     "status": "TIMEOUT",
@@ -318,13 +360,13 @@ def run_optimization_loop(sql_query: str, dataset_size: int = 50000, max_iterati
                 })
                 continue
             except Exception as e:
-                print(f" {COLOR_RED}FAILED{COLOR_RESET}")
-                print(f"    {e}")
+                _vprint(f" {COLOR_RED}FAILED{COLOR_RESET}")
+                _vprint(f"    {e}")
                 return {"status": "FAILED", "error": str(e)}
 
         # Step 3: Verify and compile and benchmark using harness.py
         log_debug(COMPONENT, "harness_start", f"q={query_id}", dataset_size=dataset_size)
-        print("  - Verifying and compiling Rust binaries...", end="", flush=True)
+        _vprint("  - Verifying and compiling Rust binaries...", end="", flush=True)
         h_start = time.perf_counter()
         harness_cmd = [
             "uv", "run", "python", "research_loop/harness.py",
@@ -367,20 +409,24 @@ def run_optimization_loop(sql_query: str, dataset_size: int = 50000, max_iterati
                 ms=int(h_time * 1000),
             )
 
+            if demo_enabled():
+                demo_from_harness_metrics(metrics)
+            elif status == "SUCCESS" and proof_verified:
+                _vprint(f" {COLOR_GREEN}VERIFIED & COMPILED{COLOR_RESET} in {h_time:.1f}s")
+                _vprint(f"    {COLOR_GREEN}Result:{COLOR_RESET} Executed in {COLOR_CYAN}{latency} us{COLOR_RESET}")
+            elif not proof_verified:
+                _vprint(f" {COLOR_RED}VERIFICATION FAILED{COLOR_RESET}")
+                if "compiler_error" in metrics and metrics["compiler_error"]:
+                    _vprint(f"    Error: {metrics['compiler_error']}")
+            else:
+                _vprint(f" {COLOR_RED}COMPILATION FAILED{COLOR_RESET}")
+                if "compiler_error" in metrics and metrics["compiler_error"]:
+                    _vprint(f"    Error: {metrics['compiler_error']}")
+
             if status == "SUCCESS" and proof_verified:
-                print(f" {COLOR_GREEN}VERIFIED & COMPILED{COLOR_RESET} in {h_time:.1f}s")
-                print(f"    {COLOR_GREEN}Result:{COLOR_RESET} Executed in {COLOR_CYAN}{latency} us{COLOR_RESET}")
                 if best_latency == -1 or latency < best_latency:
                     best_latency = latency
                     best_iteration = iteration
-            elif not proof_verified:
-                print(f" {COLOR_RED}VERIFICATION FAILED{COLOR_RESET}")
-                if "compiler_error" in metrics and metrics["compiler_error"]:
-                    print(f"    Error: {metrics['compiler_error']}")
-            else:
-                print(f" {COLOR_RED}COMPILATION FAILED{COLOR_RESET}")
-                if "compiler_error" in metrics and metrics["compiler_error"]:
-                    print(f"    Error: {metrics['compiler_error']}")
 
             history.append({
                 "iteration": iteration,
@@ -391,7 +437,9 @@ def run_optimization_loop(sql_query: str, dataset_size: int = 50000, max_iterati
             })
 
         except subprocess.TimeoutExpired:
-            print(f" {COLOR_RED}TIMEOUT{COLOR_RESET} after 90s")
+            if demo_enabled():
+                demo_step_pass_fail("✅", "Verifying implementation", int(harness_timeout * 1000), False)
+            _vprint(f" {COLOR_RED}TIMEOUT{COLOR_RESET} after 90s")
             history.append({
                 "iteration": iteration,
                 "status": "TIMEOUT",
@@ -400,19 +448,25 @@ def run_optimization_loop(sql_query: str, dataset_size: int = 50000, max_iterati
                 "error": "Harness timed out"
             })
 
-    print(f"\n{COLOR_CYAN}--- Optimization Finished ---{COLOR_RESET}")
+    if demo_enabled():
+        if best_latency != -1:
+            demo_note(f"Best: iteration {best_iteration} out of {max_iterations} at {best_latency} µs")
+    else:
+        _vprint(f"\n{COLOR_CYAN}--- Optimization Finished ---{COLOR_RESET}")
+        if best_latency != -1:
+            _vprint(f"Best iteration: {COLOR_GREEN}{best_iteration}{COLOR_RESET} with latency: {COLOR_GREEN}{best_latency} us{COLOR_RESET}")
+        else:
+            _vprint(f"{COLOR_RED}No iteration succeeded in verification and compilation.{COLOR_RESET}")
+
     if best_latency != -1:
-        print(f"Best iteration: {COLOR_GREEN}{best_iteration}{COLOR_RESET} with latency: {COLOR_GREEN}{best_latency} us{COLOR_RESET}")
         return {
             "status": "SUCCESS",
             "best_latency_us": best_latency,
             "best_iteration": best_iteration,
-            "history": history
+            "history": history,
         }
-    else:
-        print(f"{COLOR_RED}No iteration succeeded in verification and compilation.{COLOR_RESET}")
-        return {
-            "status": "FAILED",
-            "best_latency_us": -1,
-            "history": history
-        }
+    return {
+        "status": "FAILED",
+        "best_latency_us": -1,
+        "history": history,
+    }
