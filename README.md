@@ -34,6 +34,7 @@ Interactive demo (clears cache, seeds mock body, opens DuckDB CLI): `./scripts/d
 - [Dafny 4.x](https://github.com/dafny-lang/dafny) — in `PATH`
 - [Rust/Cargo](https://rustup.rs/) — for native compilation
 - [DuckDB CLI](https://duckdb.org/) — vendored to `build/duckdb` on first launcher run
+- **AI coding agent** — for live query optimization (e.g. [Cursor Agent CLI](https://cursor.com/docs/agent/cli) with `agent` on `PATH`). For offline demos without an LLM, use `./scripts/mockdemo.sh` instead.
 
 ---
 
