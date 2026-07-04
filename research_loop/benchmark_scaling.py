@@ -535,8 +535,8 @@ def plot_results(data: dict) -> Path:
         "duckdb_mt": "DuckDB (default threads)",
         "postgres_1t": "PostgreSQL (no parallel gather)",
         "postgres_mt": "PostgreSQL (default parallelism)",
-        "bare_rust": "Bare Rust",
-        "verified_rust": "Verified Rust",
+        "bare_rust": "Bare Rust (1 thread)",
+        "verified_rust": "Verified Rust (1 thread)",
     }
 
     rows: list[dict] = []
@@ -571,7 +571,7 @@ def plot_results(data: dict) -> Path:
     ax.set_yscale("log")
     ax.set_xlabel("Row count (SSB flat, log₂ scale)")
     ax.set_ylabel("Avg hot-loop time Q1–Q5 (ms, log₁₀ scale)")
-    ax.set_title("SSB Q1–Q5: avg 3rd-run hot loop vs row count")
+    ax.set_title("SSB Q1–Q5: avg 3rd-run hot loop vs row count\n(Rust engines: single-threaded scalar loops)")
     ax.set_ylim(bottom=max(min_ms * 0.5, 1e-3), top=max_ms * 2)
     ax.legend(title="Engine", bbox_to_anchor=(1.02, 1), loc="upper left")
     fig.tight_layout()
