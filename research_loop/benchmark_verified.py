@@ -77,7 +77,7 @@ def bench_verified(query_idx: int, runquery: str) -> tuple[int, bool]:
     with open(dfy, "w") as f:
         f.write(src)
     with open(cols_rs, "w") as f:
-        f.write(generate_cols_native_rs(schema))
+        f.write(generate_cols_native_rs(schema, sql_str=queries[query_idx - 1]))
 
     admission = admit_runquery(src)
     if not admission.ok:
@@ -116,7 +116,7 @@ def bench_verified(query_idx: int, runquery: str) -> tuple[int, bool]:
         return -1, True
 
     bin_path = os.path.join(proj, "target", "release", "bench")
-    r = run_cmd([bin_path], cwd=ROOT, timeout=120)
+    r = run_cmd([bin_path, TBL, str(LIMIT)], cwd=ROOT, timeout=120)
     m = re.search(r"QUERY_LATENCY_US:\s*(\d+)", r.stdout)
     return (int(m.group(1)) if m else -1), True
 

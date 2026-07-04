@@ -32,7 +32,7 @@ _RUNQUERY_RE = re.compile(
 )
 
 _VAR_DECL = r"\b(?:ghost\s+)?var\s+([A-Za-z_]\w*)"
-_NATIVE_AGG_METHODS = ("Add", "ToMap", "Snapshot")
+_NATIVE_AGG_METHODS = ("Add", "ToMap", "ToU64Map", "Snapshot")
 
 
 def _strip_comments_and_strings(text: str) -> str:
@@ -146,7 +146,7 @@ def _native_agg_violations(body: str) -> list[str]:
             violations.append(f"NativeAggMap {h} stored in array")
 
     for m in re.finditer(
-        r"\b([A-Za-z_]\w*(?:\.\w+|\.\d+)*)\.(Add|ToMap|Snapshot)\(",
+        r"\b([A-Za-z_]\w*(?:\.\w+|\.\d+)*)\.(Add|ToMap|ToU64Map|Snapshot)\(",
         clean,
     ):
         recv, method = m.group(1), m.group(2)
@@ -159,6 +159,8 @@ def _native_agg_violations(body: str) -> list[str]:
         for m in re.finditer(rf"\b(?!{re.escape(h)}\.)([A-Za-z_]\w*)\s*\(", clean):
             callee = m.group(1)
             if callee in ("if", "while", "assert", "print", "forall", "exists"):
+                continue
+            if callee.startswith("AggPush_"):
                 continue
             start = m.end()
             depth, j = 1, start

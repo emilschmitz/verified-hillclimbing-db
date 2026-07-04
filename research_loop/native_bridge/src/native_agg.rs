@@ -8,12 +8,19 @@ use std::fmt::{Debug, Formatter, Result as FmtResult};
 
 #[derive(Clone, Default)]
 pub struct NativeAggMap {
-    pub inner: HashMap<(u32, String), i64>,
+    /// Outer key: u32 group component; inner key: string group component.
+    pub inner: HashMap<u32, HashMap<String, i64>>,
 }
 
 impl Debug for NativeAggMap {
     fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
-        f.debug_map().entries(self.inner.iter()).finish()
+        let mut dm = f.debug_map();
+        for (y, bucket) in &self.inner {
+            for (s, v) in bucket {
+                dm.entry(&format!("({y}, {s:?})"), v);
+            }
+        }
+        dm.finish()
     }
 }
 
@@ -35,13 +42,18 @@ impl NativeAggMap {
     }
 
     pub fn Add(&mut self, k0: u32, k1: &Sequence<DafnyChar>, delta: i64) {
-        let k1_s = dafny_string_to_string(k1);
-        *self.inner.entry((k0, k1_s)).or_insert(0) += delta;
+        self.AddStrKey(k0, &dafny_string_to_string(k1), delta);
     }
 
     /// Same semantics as Add; uses native &str (no Dafny Sequence round-trip).
     pub fn AddStrKey(&mut self, k0: u32, k1: &str, delta: i64) {
-        *self.inner.entry((k0, k1.to_string())).or_insert(0) += delta;
+        let bucket = self.inner.entry(k0).or_default();
+        match bucket.get_mut(k1) {
+            Some(v) => *v += delta,
+            None => {
+                bucket.insert(k1.to_string(), delta);
+            }
+        }
     }
 
     pub fn ToMap(&self) -> Map<(u32, Sequence<DafnyChar>), i64> {
@@ -50,9 +62,11 @@ impl NativeAggMap {
 
     pub fn ToU64Map(&self) -> Map<(u32, Sequence<DafnyChar>), u64> {
         let mut hm: HashMap<(u32, Sequence<DafnyChar>), u64> =
-            HashMap::with_capacity(self.inner.len());
-        for ((y, s), v) in &self.inner {
-            hm.insert((*y, string_to_dafny_string(s)), *v as u64);
+            HashMap::with_capacity(self.group_count());
+        for (y, bucket) in &self.inner {
+            for (s, v) in bucket {
+                hm.insert((*y, string_to_dafny_string(s)), *v as u64);
+            }
         }
         hashmap_to_dafny_map(&hm, |k| k.clone(), |v| *v)
     }
@@ -61,11 +75,17 @@ impl NativeAggMap {
         self.snapshot_map()
     }
 
+    fn group_count(&self) -> usize {
+        self.inner.values().map(|m| m.len()).sum()
+    }
+
     fn snapshot_map(&self) -> Map<(u32, Sequence<DafnyChar>), i64> {
         let mut hm: HashMap<(u32, Sequence<DafnyChar>), i64> =
-            HashMap::with_capacity(self.inner.len());
-        for ((y, s), v) in &self.inner {
-            hm.insert((*y, string_to_dafny_string(s)), *v);
+            HashMap::with_capacity(self.group_count());
+        for (y, bucket) in &self.inner {
+            for (s, v) in bucket {
+                hm.insert((*y, string_to_dafny_string(s)), *v);
+            }
         }
         hashmap_to_dafny_map(&hm, |k| k.clone(), |v| *v)
     }

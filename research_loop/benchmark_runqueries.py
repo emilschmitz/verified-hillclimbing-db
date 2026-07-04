@@ -106,7 +106,7 @@ method RunQuery(cols: Cols) returns (res: map<(NativeU32, string), NativeU64>)
       var rev := cols.GetLO_REVENUE(i);
       ValidCols_GetLO_REVENUE(cols, i);
       var term := ((rev as int) as NativeU64);
-      agg.Add(yr, brand, term as NativeI64);
+      cols.AggPush_D_YEAR_P_BRAND(agg, i, term as NativeI64);
       ghost var prev := if key in g then g[key] else 0 as NativeU64;
       g := g[key := AddU64(prev, term)];
     }
@@ -140,7 +140,7 @@ method RunQuery(cols: Cols) returns (res: map<(NativeU32, string), NativeU64>)
       var rev := cols.GetLO_REVENUE(i);
       ValidCols_GetLO_REVENUE(cols, i);
       var term := ((rev as int) as NativeU64);
-      agg.Add(yr, brand, term as NativeI64);
+      cols.AggPush_D_YEAR_P_BRAND(agg, i, term as NativeI64);
       ghost var prev := if key in g then g[key] else 0 as NativeU64;
       g := g[key := AddU64(prev, term)];
     }
@@ -228,7 +228,7 @@ method RunQuery(cols: Cols) returns (res: map<(NativeU32, string), NativeI64>)
       var nation := cols.GetC_NATION(i);
       var key := (yr, nation);
       var term := SubU64ToI64(cols.GetLO_REVENUE(i), cols.GetLO_SUPPLYCOST(i));
-      agg.Add(yr, nation, term);
+      cols.AggPush_D_YEAR_C_NATION(agg, i, term);
       ghost var prev := if key in g then g[key] else 0 as NativeI64;
       g := g[key := AddI64(prev, term)];
     }

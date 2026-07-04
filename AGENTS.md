@@ -33,13 +33,18 @@ The agent must **not** add `requires`, `ensures`, or new declarations.
 ### Group-by (2-key, `NativeU64` values)
 
 `NativeAggMap` accumulates `NativeI64`. For `SUM(u64)` group-bys, use one `new NativeAggMap()`,
-a **ghost** `NativeU64` map tied to `MethodSpecHelper`, and system lemmas:
+a **ghost** `NativeU64` map tied to `MethodSpecHelper`, and system lemmas.
+
+When the query group-by is `(NativeU32, string)`, the transpiler emits
+`cols.AggPush_<U32COL>_<STRCOL>(agg, i, delta)` — prefer that over `agg.Add` (avoids Dafny
+string allocation on the hot path):
 
 ```dafny
 var agg := new NativeAggMap();
 ghost var g: map<(NativeU32, string), NativeU64> := map[];
 // loop invariant: g == MethodSpecHelper(cols, i) && agg.Snapshot() matches g as int
-// on match: ValidCols_Get<MoneyCol>(cols, i); term := ((cell as int) as NativeU64); agg.Add(..., term as NativeI64);
+// on match: ValidCols_Get<MoneyCol>(cols, i); term := ((cell as int) as NativeU64);
+//   cols.AggPush_<U32COL>_<STRCOL>(agg, i, term as NativeI64);
 // end: res := agg.ToU64Map();
 ```
 

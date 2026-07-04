@@ -296,12 +296,12 @@ def bench_bare(q: int, limit: int) -> dict:
     }
 
 
-def verified_bin_path(q: int, limit: int) -> Path:
-    return VERIFIED_CACHE / f"q{q}_n{limit}"
+def verified_bin_path(q: int) -> Path:
+    return VERIFIED_CACHE / f"q{q}"
 
 
-def build_verified(q: int, limit: int) -> Path:
-    dest = verified_bin_path(q, limit)
+def build_verified(q: int) -> Path:
+    dest = verified_bin_path(q)
     bin_path = dest / "bench"
     if bin_path.is_file():
         return bin_path
@@ -312,13 +312,13 @@ def build_verified(q: int, limit: int) -> Path:
     spec = transpile_sql_to_dafny_columnar(queries[q - 1], schema)
     src = f'{spec}\n\n{runquery}\n\nmethod {{:verify false}} Main() {{ print "SUCCESS\\n"; }}\n'
 
-    work = BUILD / f"q{q}_n{limit}"
+    work = BUILD / f"q{q}"
     shutil.rmtree(work, ignore_errors=True)
     work.mkdir(parents=True)
     dfy = work / "q.dfy"
     cols_rs = work / "cols_native.rs"
     dfy.write_text(src)
-    cols_rs.write_text(generate_cols_native_rs(schema))
+    cols_rs.write_text(generate_cols_native_rs(schema, sql_str=queries[q - 1]))
 
     admission = admit_runquery(src)
     if not admission.ok:
@@ -346,8 +346,8 @@ def build_verified(q: int, limit: int) -> Path:
         f'[package]\nname = "bench"\nversion = "0.1.0"\nedition = "2021"\n'
         f'[dependencies]\ndafny_runtime = {{ path = "{RUNTIME}" }}\n'
     )
-    postprocess(str(main_rs), str(TBL), limit, allow_fast_native_agg=admission.allow_fast_native_agg)
-    inject_hot_loop_main(str(main_rs), str(TBL), limit)
+    postprocess(str(main_rs), str(TBL), 50_000, allow_fast_native_agg=admission.allow_fast_native_agg)
+    inject_hot_loop_main(str(main_rs), str(TBL), 50_000)
     env = os.environ.copy()
     env["RUSTFLAGS"] = "-C target-cpu=native"
     b = run(["cargo", "build", "--release"], cwd=proj, timeout=300, env=env)
@@ -361,11 +361,11 @@ def build_verified(q: int, limit: int) -> Path:
 
 def bench_verified(q: int, limit: int) -> dict:
     try:
-        bin_path = build_verified(q, limit)
+        bin_path = build_verified(q)
     except Exception as e:
         return {"error": str(e)}
     t0 = time.perf_counter()
-    r = run([str(bin_path)], cwd=ROOT, timeout=300)
+    r = run([str(bin_path), str(TBL), str(limit)], cwd=ROOT, timeout=300)
     wall_s = time.perf_counter() - t0
     if r.returncode != 0:
         return {"error": (r.stdout + r.stderr)[-500:], "wall_s": round(wall_s, 3)}
@@ -407,10 +407,11 @@ def refresh_queries(data: dict, query_ids: list[int], *, refresh_bare: bool = Tr
     for q in query_ids:
         if q not in QUERIES:
             raise ValueError(f"query {q} not in scaling set {QUERIES}")
-        for limit in sizes:
-            cache = verified_bin_path(q, limit)
-            if cache.is_dir():
-                shutil.rmtree(cache, ignore_errors=True)
+        cache = verified_bin_path(q)
+        if cache.is_dir():
+            shutil.rmtree(cache, ignore_errors=True)
+        work = BUILD / f"q{q}"
+        shutil.rmtree(work, ignore_errors=True)
 
     for limit in sizes:
         key = str(limit)

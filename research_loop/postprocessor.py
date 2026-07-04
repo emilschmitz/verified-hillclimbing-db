@@ -232,6 +232,12 @@ def _optimize_native_agg_calls(content: str) -> str:
         return content
     rs, re_ = span
     body = content[rs:re_]
+    # Transpiler Cols::AggPush_* — fix Dafny codegen (&agg, &i) to hot-path (&mut agg, usize i).
+    body = re.sub(
+        r"cols_ref\.(AggPush_[A-Z0-9_]+)\(&agg,\s*(?:&)?i(?:\.clone\(\))?, ([^)]+)\)",
+        r"cols_ref.\1(&mut agg, i, \2)",
+        body,
+    )
     # yr + nation locals + optional key tuple + agg.Add(&nation) — drop Dafny string allocs.
     body = re.sub(
         r"let mut ([a-zA-Z_]+): u32 = cols_ref\.Get([A-Z0-9_]+)_usize\(i\);\s*"
@@ -450,6 +456,7 @@ fn load_cols_from_tbl(tbl_path: &str, limit: usize) -> ::dafny_runtime::Object<c
 
 
 def inject_hot_loop_main(file_path: str, tbl_path: str, row_limit: int) -> None:
+    """Append benchmark main. Usage: bench [tbl_path] [row_limit] (defaults from args)."""
     with open(file_path) as f:
         content = f.read()
     content = re.sub(r"\nfn main\s*\(\)\s*\{[\s\S]*\}\s*$", "\n", content)
@@ -457,13 +464,21 @@ def inject_hot_loop_main(file_path: str, tbl_path: str, row_limit: int) -> None:
     state = PostProcessState(tbl_path=tbl_path, row_limit=row_limit)
     native_rs = os.path.join(os.path.dirname(file_path), "cols_native.rs")
     uses_cols = "ColsNative" in content and re.search(r"fn RunQuery\s*\(\s*cols:", content)
+    main_args = f"""
+    let tbl_owned = std::env::args().nth(1);
+    let tbl = tbl_owned.as_deref().unwrap_or({tbl_lit});
+    let limit: usize = std::env::args()
+        .nth(2)
+        .and_then(|s| s.parse().ok())
+        .unwrap_or({row_limit});"""
     if uses_cols and os.path.exists(native_rs):
         _extract_cols_schema_from_native_rs(native_rs, state)
         harness = f"""
 {_build_load_cols_fn(state, tbl_lit)}
 fn main() {{
     use std::time::Instant;
-    let cols = load_cols_from_tbl({tbl_lit}, {row_limit});
+{main_args}
+    let cols = load_cols_from_tbl(tbl, limit);
     for run in 0..3 {{
         let t0 = Instant::now();
         let _ = crate::_module::_default::RunQuery(&cols);
@@ -485,7 +500,8 @@ fn main() {{
         harness = f"""
 fn main() {{
     use std::time::Instant;
-    let data = crate::dataset::load_dataset::<crate::_module::Row>({tbl_lit}, {row_limit});
+{main_args}
+    let data = crate::dataset::load_dataset::<crate::_module::Row>(tbl, limit);
     for run in 0..3 {{
         let t0 = Instant::now();
         let _ = crate::_module::_default::RunQuery(&data);

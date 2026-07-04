@@ -219,5 +219,25 @@ class TestTranspilerUnit(unittest.TestCase):
         self.assertIn("(cols.Getamount(i) as int) < LemmaMaxMoneyU64", result)
         self.assertIn("|cols.Getlabel(i)| <= LemmaMaxStringLen", result)
 
+    def test_columnar_agg_push_two_key_u32_string(self):
+        from sql_transpiler import generate_cols_native_rs, transpile_sql_to_dafny_columnar
+
+        schema = {
+            "yr": "int",
+            "brand": "string",
+            "rev": "bigint",
+        }
+        sql = "SELECT yr, brand, SUM(rev) FROM t GROUP BY yr, brand"
+        result = transpile_sql_to_dafny_columnar(sql, schema)
+        self.assertIn("method {:extern} {:axiom} AggPush_yr_brand(agg: NativeAggMap", result)
+        self.assertIn("cols.AggPush_yr_brand(agg, i, term)", result)
+
+        rs = generate_cols_native_rs(schema, sql_str=sql)
+        self.assertIn("pub fn AggPush_yr_brand", rs)
+        self.assertIn("agg.AddStrKey(self.yr[i], self.brand[i].as_str(), delta)", rs)
+
+        rs_no_group = generate_cols_native_rs(schema)
+        self.assertNotIn("AggPush_yr_brand", rs_no_group)
+
 if __name__ == '__main__':
     unittest.main()

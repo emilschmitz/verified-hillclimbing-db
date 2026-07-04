@@ -614,8 +614,13 @@ def _to_col_expr(expr: str, idx: str) -> str:
     )
 
 
-def _emit_cols_class(schema_dict: dict[str, str]) -> str:
+def _emit_cols_class(
+    schema_dict: dict[str, str],
+    agg_push: tuple[str, str] | None = None,
+) -> str:
     """Single extern ColsNative class — one Rust Object, direct slice accessors."""
+    from .agg_push import emit_cols_agg_push_dafny
+
     lines = [
         'class {:extern "ColsNative"} Cols {',
         '  function {:extern} n(): int',
@@ -625,12 +630,31 @@ def _emit_cols_class(schema_dict: dict[str, str]) -> str:
         lines.append(f'  function {{:extern}} Get{col}(i: int): {ret}')
         if ret == 'string':
             lines.append(f'  function {{:extern}} EqAt{col}(i: int, lit: string): bool')
+    if agg_push is not None:
+        lines.append(emit_cols_agg_push_dafny(*agg_push))
     lines.append('}')
     return '\n'.join(lines)
 
 
-def generate_cols_native_rs(schema_dict: dict[str, str]) -> str:
-    """Schema-specific Rust ColsNative (Arc<Vec<T>> + Get*/EqAt* for Dafny translate)."""
+def generate_cols_native_rs(
+    schema_dict: dict[str, str],
+    *,
+    sql_str: str | None = None,
+    groupby_columns: list[str] | None = None,
+) -> str:
+    """Schema-specific Rust ColsNative (Arc<Vec<T>> + Get*/EqAt* for Dafny translate).
+
+    When `sql_str` or `groupby_columns` describes a 2-key (NativeU32, string) group-by,
+    also emits `AggPush_<u32>_<str>` calling `NativeAggMap::AddStrKey` without Dafny strings.
+    """
+    from .agg_push import emit_cols_agg_push_rust, resolve_two_key_u32_str_groupby
+
+    if groupby_columns is None and sql_str is not None:
+        groupby_columns = parse_sql(sql_str, schema_dict).groupby_columns
+    agg_push = resolve_two_key_u32_str_groupby(
+        groupby_columns, schema_dict, col_dafny_type=_col_dafny_type
+    )
+
     field_lines = ['    pub n: usize,']
     for col, col_type in schema_dict.items():
         rust_ty = _col_rust_vec_type(col_type)
@@ -671,7 +695,13 @@ def generate_cols_native_rs(schema_dict: dict[str, str]) -> str:
         self.{field}[i]
     }}''')
 
-    return f'''use dafny_runtime::{{
+    agg_push_methods = ""
+    agg_import = ""
+    if agg_push is not None:
+        agg_import = "use crate::native_agg::NativeAggMap;\n"
+        agg_push_methods = emit_cols_agg_push_rust(*agg_push)
+
+    return f'''{agg_import}use dafny_runtime::{{
     dafny_runtime_conversions::unicode_chars_true::{{dafny_string_to_string, string_to_dafny_string}},
     allocate_object, DynAny, DafnyChar, DafnyInt, DafnyPrint, Object, Rc, Sequence, UpcastObject,
 }};
@@ -709,7 +739,7 @@ impl ColsNative {{
     pub fn n(&self) -> DafnyInt {{
         DafnyInt::from(self.n)
     }}
-{"".join(get_methods)}
+{"".join(get_methods)}{agg_push_methods}
 }}
 '''
 
@@ -779,8 +809,14 @@ def transpile_sql_to_dafny_columnar(sql_str: str, schema_dict: dict[str, str]) -
             raise UnsupportedContractError(f"Unsupported column type in schema: {col_type}")
     query = parse_sql(sql_str, schema_dict)
 
+    from .agg_push import agg_push_method_name, resolve_two_key_u32_str_groupby
+
+    agg_push = resolve_two_key_u32_str_groupby(
+        query.groupby_columns, schema_dict, col_dafny_type=_col_dafny_type
+    )
+
     # 2. Emit the native `Cols` extern class (ColsNative in Rust).
-    cols_class = _emit_cols_class(schema_dict)
+    cols_class = _emit_cols_class(schema_dict, agg_push)
 
     # 2b. ValidCols: global row/cell bounds (Lemma policy) + column alignment
     valid_cols_predicate = emit_valid_cols_predicate(schema_dict)
@@ -840,17 +876,32 @@ def transpile_sql_to_dafny_columnar(sql_str: str, schema_dict: dict[str, str]) -
             "  invariant g == MethodSpecHelper(cols, i)\n"
             "  invariant agg.Snapshot() == g\n"
         )
-        body_hint = (
-            "    // TODO: if <filter using EqAt* for string cols> {\n"
-            "    //   var k0 := cols.Get<group-int>(i);\n"
-            "    //   var k1 := cols.Get<group-string>(i);\n"
-            "    //   var key := (k0, k1);\n"
-            "    //   var term := <native agg term, e.g. SubU64ToI64(...)>;\n"
-            "    //   agg.Add(k0, k1, term);  // postprocessor → AddStrKey + str_ref\n"
-            "    //   ghost var prev := if key in g then g[key] else 0 as NativeI64;\n"
-            "    //   g := g[key := AddI64(prev, term)];\n"
-            "    // }\n"
-        )
+        if agg_push is not None:
+            u32_col, str_col = agg_push
+            push_name = agg_push_method_name(u32_col, str_col)
+            body_hint = (
+                "    // TODO: if <filter using EqAt* for string cols> {\n"
+                f"    //   var k0 := cols.Get{u32_col}(i);\n"
+                f"    //   var k1 := cols.Get{str_col}(i);\n"
+                "    //   var key := (k0, k1);\n"
+                "    //   var term := <native agg term, e.g. SubU64ToI64(...)>;\n"
+                f"    //   cols.{push_name}(agg, i, term);  // Rust: AddStrKey, no Dafny string alloc\n"
+                "    //   ghost var prev := if key in g then g[key] else 0 as NativeI64;\n"
+                "    //   g := g[key := AddI64(prev, term)];\n"
+                "    // }\n"
+            )
+        else:
+            body_hint = (
+                "    // TODO: if <filter using EqAt* for string cols> {\n"
+                "    //   var k0 := cols.Get<group-int>(i);\n"
+                "    //   var k1 := cols.Get<group-string>(i);\n"
+                "    //   var key := (k0, k1);\n"
+                "    //   var term := <native agg term, e.g. SubU64ToI64(...)>;\n"
+                "    //   agg.Add(k0, k1, term);\n"
+                "    //   ghost var prev := if key in g then g[key] else 0 as NativeI64;\n"
+                "    //   g := g[key := AddI64(prev, term)];\n"
+                "    // }\n"
+            )
         run_body_init = (
             "//   var agg := new NativeAggMap();\n"
             "//   ghost var g: map<..., NativeI64> := map[];\n"

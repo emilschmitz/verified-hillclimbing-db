@@ -14,12 +14,12 @@ NATIVE_AGG = str(NATIVE_BRIDGE / "native_agg.rs")
 DEFAULT_TBL = "ssb-dbgen/lineorder_flat.tbl"
 
 
-def write_cols_native_rs(temp_dir: str, schema: dict[str, str]) -> str:
+def write_cols_native_rs(temp_dir: str, schema: dict[str, str], sql_str: str | None = None) -> str:
     from sql_transpiler import generate_cols_native_rs
 
     path = os.path.join(temp_dir, "cols_native.rs")
     with open(path, "w") as f:
-        f.write(generate_cols_native_rs(schema))
+        f.write(generate_cols_native_rs(schema, sql_str=sql_str))
     return path
 
 

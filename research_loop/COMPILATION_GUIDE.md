@@ -131,6 +131,9 @@ method RunQuery(cols: Cols) returns (res: NativeU64)
 - String filters: `cols.EqAtP_CATEGORY(i, "MFGR#12")` not `Get… == "…"` when possible.
 - Group-by: `var agg := new NativeAggMap();` with ghost map invariant tying
   `agg.Snapshot()` to `MethodSpecHelper` (see `benchmark_runqueries.py`).
+- For 2-key `(NativeU32, string)` group-bys, the transpiler emits
+  `cols.AggPush_<U32COL>_<STRCOL>(agg, i, delta)` on `ColsNative` (Rust: `AddStrKey` with
+  column `&str` refs). Prefer this over `agg.Add` — no Dafny string alloc per row.
 
 ### NativeAggMap rules (admission lint)
 
@@ -180,13 +183,14 @@ unchanged.
 | `GetCOL(&i)` → `GetCOL_usize(i)` | Direct `Vec` index | No `DafnyInt` per read | Relies on Dafny proof that `i` in range |
 | `EqAt…(…, string_of("lit"))` → `EqAt…_usize(i, "lit")` | `&str` compare | Skip `Sequence` alloc | UTF-8 string data assumption |
 | Stack `NativeAggMap` | Drop `Object` wrapper | Direct `HashMap` updates | **Requires** `admit_runquery` (no aliasing) |
-| `Add` → `AddStrKey` | `&str` group keys | Skip Dafny string wrappers | Matched codegen shapes only |
+| `Add` → `AddStrKey` | `&str` group keys | Skip Dafny string wrappers | Prefer transpiler `AggPush_*`; postprocessor fallback for legacy `agg.Add` shapes |
 | Strip `MaybePlacebo` | Direct `return` | Less clone/wrapper | Narrow return pattern |
 
 **Not done anymore (do not document / expect):** blanket `DafnyInt` → `u64` for all
 locals, row-oriented `seq<Row>` unwrap, `HashMap` replacement for Dafny `Map` in general.
 
 `inject_hot_loop_main()` adds benchmark `main` that loads `.tbl` → `ColsNative`.
+Usage: `bench [tbl_path] [row_limit]` (defaults baked at build time if omitted).
 
 Slow path: `postprocess(..., allow_fast_native_agg=False)` skips agg rewrites.
 

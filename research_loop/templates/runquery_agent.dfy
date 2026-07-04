@@ -17,6 +17,7 @@
   // var agg := new NativeAggMap();
   // ghost var g: map<(NativeU32, string), NativeU64> := map[];
   // ... invariant g == MethodSpecHelper(cols, i) && agg.Snapshot() matches g ...
-  // ValidCols_Get<col>(cols, i); term := ((rev as int) as NativeU64); agg.Add(k0, k1, term as NativeI64);
+  // ValidCols_Get<col>(cols, i); term := ((rev as int) as NativeU64);
+  // cols.AggPush_<U32COL>_<STRCOL>(agg, i, term as NativeI64);  // see transpiled spec
   // res := agg.ToU64Map();
 }
