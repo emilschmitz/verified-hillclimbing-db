@@ -1,0 +1,35 @@
+{
+  "table": "/home/emil/projects/verified-hillclimbing-db/data/tpch-sf1/lineitem.tbl",
+  "meta": {
+    "scale_factor": 1.0,
+    "row_count": 6001215,
+    "table": "lineitem",
+    "path": "/home/emil/projects/verified-hillclimbing-db/data/tpch-sf1/lineitem.tbl"
+  },
+  "queries": {
+    "Q1": {
+      "sql": "SELECT l_returnflag, l_linestatus, SUM(l_quantity) AS sum_qty\nFROM lineitem\nWHERE l_shipdate <= 19980902\nGROUP BY l_returnflag, l_linestatus",
+      "duckdb_1t_us": 208386,
+      "duckdb_mt_us": 180825,
+      "bare_rust_us": 31319,
+      "verified_rust": {
+        "hot_us": 62706,
+        "wall_s": 8.246,
+        "rows": 6001215,
+        "cached": false
+      }
+    },
+    "Q6": {
+      "sql": "SELECT SUM(l_extendedprice * l_discount) AS revenue\nFROM lineitem\nWHERE l_quantity >= 1 AND l_quantity <= 50\n  AND l_discount >= 1 AND l_discount <= 5\n  AND l_shipdate >= 19960101 AND l_shipdate <= 19961231",
+      "duckdb_1t_us": 34361,
+      "duckdb_mt_us": 26829,
+      "bare_rust_us": 38953,
+      "verified_rust": {
+        "hot_us": 44966,
+        "wall_s": 3.184,
+        "rows": 6001215,
+        "cached": false
+      }
+    }
+  }
+}

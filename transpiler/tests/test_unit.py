@@ -239,5 +239,51 @@ class TestTranspilerUnit(unittest.TestCase):
         rs_no_group = generate_cols_native_rs(schema)
         self.assertNotIn("AggPush_yr_brand", rs_no_group)
 
+    def test_columnar_agg_push_str_two_key_string_string(self):
+        from sql_transpiler import generate_cols_native_rs, transpile_sql_to_dafny_columnar
+
+        schema = {
+            "flag": "varchar",
+            "status": "varchar",
+            "qty": "integer",
+        }
+        sql = "SELECT flag, status, SUM(qty) FROM t GROUP BY flag, status"
+        result = transpile_sql_to_dafny_columnar(sql, schema)
+        self.assertIn(
+            "method {:extern} {:axiom} AggPushStr_flag_status(agg: NativeAggStrMap",
+            result,
+        )
+        self.assertIn("NativeAggStrMap", result)
+
+        rs = generate_cols_native_rs(schema, sql_str=sql)
+        self.assertIn("pub fn AggPushStr_flag_status", rs)
+        self.assertIn(
+            "agg.AddStrPair(self.flag[i].as_str(), self.status[i].as_str(), delta)",
+            rs,
+        )
+
+        rs_no_group = generate_cols_native_rs(schema)
+        self.assertNotIn("AggPushStr_flag_status", rs_no_group)
+
+    def test_column_projection_from_sql(self):
+        from sql_transpiler import columns_used_by_query, project_schema_for_query, generate_cols_native_rs
+
+        schema = {
+            "A": "integer",
+            "B": "varchar",
+            "C": "bigint",
+            "D": "varchar",
+        }
+        sql = "SELECT B, SUM(A) FROM t WHERE C > 0 GROUP BY B"
+        used = columns_used_by_query(sql, schema)
+        self.assertEqual(used, {"A", "B", "C"})
+        projected = project_schema_for_query(sql, schema)
+        self.assertEqual(set(projected.keys()), {"A", "B", "C"})
+        rs = generate_cols_native_rs(projected, sql_str=sql)
+        self.assertIn("pub a: Arc<Vec<u32>>", rs)
+        self.assertIn("pub b: Arc<Vec<String>>", rs)
+        self.assertIn("pub c: Arc<Vec<u64>>", rs)
+        self.assertNotIn("pub d:", rs)
+
 if __name__ == '__main__':
     unittest.main()

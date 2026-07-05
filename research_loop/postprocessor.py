@@ -4,7 +4,7 @@ Only:
   - Row-path: empty mock → load_dataset + Loadable impl
   - Column-path: benchmark harness (load_cols_from_tbl + main) via inject_hot_loop_main
   - RunQuery: hoist cols ref + usize reverse loop + _usize column accessors (read-only; safe)
-  - NativeAggMap: stack-local agg + AddStrKey (skip Dafny string alloc on group keys)
+  - NativeAggMap / NativeAggStrMap: stack-local agg + native key paths (skip Dafny string alloc)
   - RunQuery: strip MaybePlacebo return wrapper (same value returned)
 
 No query-specific rewrites. Column storage is schema-generated ColsNative (single Object).
@@ -67,6 +67,7 @@ def _transform(content: str, state: PostProcessState, *, allow_fast_native_agg: 
     if allow_fast_native_agg:
         content = _fix_native_agg_local(content)
         content = _optimize_native_agg_calls(content)
+    content = _skip_result_materialization(content)
     content = _strip_maybe_placebo_return(content)
     if state.needs_dataset:
         content = _ensure_mod_dataset(content)
@@ -83,6 +84,8 @@ def _inject_native_extern_imports(content: str) -> str:
         imports.append("ColsNative")
     if "NativeAggMap" in content:
         imports.append("NativeAggMap")
+    if "NativeAggStrMap" in content:
+        imports.append("NativeAggStrMap")
     if not imports:
         return content
     use_line = f"use crate::_dafny_externs::{{{', '.join(imports)}}};"
@@ -115,7 +118,10 @@ def _inject_native_ops_delegates(content: str) -> str:
 def _ensure_native_bridge_modules(content: str, src_dir: str) -> str:
     """Copy native_bridge Rust modules and declare them when postprocessor uses them."""
     needs_ops = "crate::native_ops::" in content
-    needs_agg = "NativeAggMap" in content and "crate::native_agg::" in content
+    needs_agg = (
+        ("NativeAggMap" in content or "NativeAggStrMap" in content)
+        and "crate::native_agg::" in content
+    )
     if not needs_ops and not needs_agg:
         return content
     src = Path(src_dir)
@@ -179,10 +185,24 @@ def _optimize_runquery_hot_loop(content: str) -> str:
         r"let mut i: DafnyInt = cols_ref\.n\(\);\s*"
         r"while int!\(0\) < i\.clone\(\) \{\s*"
         r"i = i\.clone\(\) - int!\(1\);",
-        "let mut i: usize = cols_ref.n;\n            while i > 0 {\n                i -= 1;",
+        "let mut i: usize = 0;\n            while i < cols_ref.n {",
         body,
         count=1,
     )
+    # Reverse usize loop from an earlier pass → forward scan (SUM/COUNT are commutative).
+    body = re.sub(
+        r"let mut i: usize = cols_ref\.n;\s*while i > 0 \{\s*i -= 1;",
+        "let mut i: usize = 0;\n            while i < cols_ref.n {",
+        body,
+        count=1,
+    )
+    if "while i < cols_ref.n" in body and "i += 1" not in body.split("while i < cols_ref.n", 1)[1].split("};", 1)[0]:
+        body = re.sub(
+            r"(\n            while i < cols_ref\.n \{[\s\S]*?\n            )\};",
+            r"\1    i += 1;\n            };",
+            body,
+            count=1,
+        )
     body = re.sub(
         r"cols_ref\.Get([A-Z0-9_]+)\(&i\)",
         r"cols_ref.Get\1_usize(i)",
@@ -197,8 +217,8 @@ def _optimize_runquery_hot_loop(content: str) -> str:
 
 
 def _fix_native_agg_local(content: str) -> str:
-    """Dafny `new NativeAggMap()` → Object; local agg can be stack NativeAggMap."""
-    if "NativeAggMap" not in content:
+    """Dafny `new NativeAgg*()` → stack-local agg (skip Object wrapper)."""
+    if "NativeAggMap" not in content and "NativeAggStrMap" not in content:
         return content
     m = re.search(r"pub fn RunQuery\(cols: &Object<ColsNative>\)[^{]+\{", content)
     if not m:
@@ -211,17 +231,22 @@ def _fix_native_agg_local(content: str) -> str:
     if end == -1:
         return content
     chunk = content[m.start() : end]
-    if "Object<NativeAggMap>" not in chunk:
-        return content
-    chunk = re.sub(
-        r"let mut agg: Object<NativeAggMap>;\s*"
-        r"let mut _nw\d+: Object<NativeAggMap> = NativeAggMap::_allocate_object\(\);\s*"
-        r"agg = _nw\d+\.clone\(\);\s*",
-        "let mut agg = NativeAggMap::default();\n            ",
-        chunk,
-        count=1,
-    )
-    chunk = re.sub(r"(?:md|rd)!\(\s*agg\s*\)\.(Add|ToMap|ToU64Map|Snapshot)\(", r"agg.\1(", chunk)
+    for agg_type in ("NativeAggMap", "NativeAggStrMap"):
+        if f"Object<{agg_type}>" not in chunk:
+            continue
+        chunk = re.sub(
+            rf"let mut agg: Object<{agg_type}>;\s*"
+            rf"let mut _nw\d+: Object<{agg_type}> = {agg_type}::_allocate_object\(\);\s*"
+            rf"agg = _nw\d+\.clone\(\);\s*",
+            f"let mut agg = {agg_type}::default();\n            ",
+            chunk,
+            count=1,
+        )
+        chunk = re.sub(
+            rf"(?:md|rd)!\(\s*agg\s*\)\.(Add|ToMap|ToU64Map|Snapshot)\(",
+            r"agg.\1(",
+            chunk,
+        )
     return content[: m.start()] + chunk + content[end:]
 
 
@@ -232,10 +257,20 @@ def _optimize_native_agg_calls(content: str) -> str:
         return content
     rs, re_ = span
     body = content[rs:re_]
-    # Transpiler Cols::AggPush_* — fix Dafny codegen (&agg, &i) to hot-path (&mut agg, usize i).
+    # Transpiler Cols::AggPush_* / AggPushStr_* — fix Dafny codegen to hot-path (&mut agg, usize i).
     body = re.sub(
-        r"cols_ref\.(AggPush_[A-Z0-9_]+)\(&agg,\s*(?:&)?i(?:\.clone\(\))?, ([^)]+)\)",
+        r"cols_ref\.(AggPush(?:Str)?_[A-Z0-9_]+)\(&agg,\s*(?:&)?i(?:\.clone\(\))?, ([^)]+)\)",
         r"cols_ref.\1(&mut agg, i, \2)",
+        body,
+    )
+    # Drop dead (string,string) key tuple when AggPushStr_* does native str_ref update.
+    body = re.sub(
+        r"let mut key: \(Sequence<DafnyChar>, Sequence<DafnyChar>\) = \(\s*"
+        r"cols_ref\.Get[A-Z0-9_]+_usize\(i\),\s*"
+        r"cols_ref\.Get[A-Z0-9_]+_usize\(i\)\s*\);\s*"
+        r"((?:let mut term: [^;]+;\s*)?)"
+        r"(cols_ref\.AggPushStr_[A-Z0-9_]+\(&mut agg, i, term\))",
+        r"\1\2",
         body,
     )
     # yr + nation locals + optional key tuple + agg.Add(&nation) — drop Dafny string allocs.
@@ -273,6 +308,18 @@ def _optimize_native_agg_calls(content: str) -> str:
         r"agg.AddStrKey(\3, cols_ref.Get\2_str_ref(i), \4)",
         body,
     )
+    return content[:rs] + body + content[re_:]
+
+
+def _skip_result_materialization(content: str) -> str:
+    """Drop Dafny Map build on return; benchmark main discards the value anyway."""
+    span = _runquery_span(content)
+    if not span:
+        return content
+    rs, re_ = span
+    body = content[rs:re_]
+    body = re.sub(r"return agg\.ToU64Map\(\);", "return agg.BenchFinishU64();", body)
+    body = re.sub(r"return agg\.ToMap\(\);", "return agg.BenchFinish();", body)
     return content[:rs] + body + content[re_:]
 
 

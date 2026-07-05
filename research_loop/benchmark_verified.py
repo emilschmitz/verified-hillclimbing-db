@@ -63,9 +63,13 @@ def bench_bare(query_idx: int) -> int:
 
 
 def bench_verified(query_idx: int, runquery: str) -> tuple[int, bool]:
+    from sql_transpiler import project_schema_for_query
+
     catalog = DatabaseCatalog()
     schema = catalog.get_table_schema("lineorder_flat")
-    spec = transpile_sql_to_dafny_columnar(queries[query_idx - 1], schema)
+    sql = queries[query_idx - 1]
+    query_schema = project_schema_for_query(sql, schema)
+    spec = transpile_sql_to_dafny_columnar(sql, query_schema)
     main = 'method {:verify false} Main() { print "SUCCESS\\n"; }'
     src = f"{spec}\n\n{runquery}\n\n{main}\n"
 
@@ -77,7 +81,7 @@ def bench_verified(query_idx: int, runquery: str) -> tuple[int, bool]:
     with open(dfy, "w") as f:
         f.write(src)
     with open(cols_rs, "w") as f:
-        f.write(generate_cols_native_rs(schema, sql_str=queries[query_idx - 1]))
+        f.write(generate_cols_native_rs(query_schema, sql_str=sql))
 
     admission = admit_runquery(src)
     if not admission.ok:

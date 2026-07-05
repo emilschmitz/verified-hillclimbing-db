@@ -36,3 +36,19 @@ class {:extern "NativeAggMap"} NativeAggMap {
     ensures forall k :: k in Snapshot() ==> k in m && m[k] as int == Snapshot()[k] as int
     ensures forall k :: k in m ==> k in Snapshot()
 }
+
+class {:extern "NativeAggStrMap"} NativeAggStrMap {
+  function {:extern} Snapshot(): map<(string, string), NativeU64>
+
+  constructor {:extern} {:axiom} ()
+    ensures Snapshot() == map[]
+
+  method {:extern} {:axiom} Add(k0: string, k1: string, delta: NativeU64)
+    modifies this
+    ensures Snapshot() == old(Snapshot())[(k0, k1) := AddU64(
+      if (k0, k1) in old(Snapshot()) then old(Snapshot())[(k0, k1)] else 0 as NativeU64,
+      delta)]
+
+  method {:extern} ToMap() returns (m: map<(string, string), NativeU64>)
+    ensures m == Snapshot()
+}

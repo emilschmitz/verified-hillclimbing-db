@@ -15,8 +15,10 @@ DEFAULT_TBL = "ssb-dbgen/lineorder_flat.tbl"
 
 
 def write_cols_native_rs(temp_dir: str, schema: dict[str, str], sql_str: str | None = None) -> str:
-    from sql_transpiler import generate_cols_native_rs
+    from sql_transpiler import generate_cols_native_rs, project_schema_for_query
 
+    if sql_str is not None:
+        schema = project_schema_for_query(sql_str, schema)
     path = os.path.join(temp_dir, "cols_native.rs")
     with open(path, "w") as f:
         f.write(generate_cols_native_rs(schema, sql_str=sql_str))

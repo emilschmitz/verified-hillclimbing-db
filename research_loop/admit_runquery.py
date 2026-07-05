@@ -1,6 +1,6 @@
 """Admission gate for RunQuery before dafny verify.
 
-Policy: NativeAggMap must be linear (one instance, no aliasing) for fast postprocess path.
+Policy: native agg maps (NativeAggMap / NativeAggStrMap) must be linear for fast postprocess.
 """
 from __future__ import annotations
 
@@ -10,9 +10,9 @@ from enum import Enum
 
 
 class NativeAggMode(str, Enum):
-    NONE = "none"  # no NativeAggMap in RunQuery
-    FAST = "fast"  # safe for stack NativeAggMap postprocessor passes
-    SLOW = "slow"  # NativeAggMap used but aliasing / escape detected
+    NONE = "none"
+    FAST = "fast"  # safe for stack native agg postprocessor passes
+    SLOW = "slow"  # native agg used but aliasing / escape detected
 
 
 @dataclass
@@ -32,7 +32,17 @@ _RUNQUERY_RE = re.compile(
 )
 
 _VAR_DECL = r"\b(?:ghost\s+)?var\s+([A-Za-z_]\w*)"
-_NATIVE_AGG_METHODS = ("Add", "ToMap", "ToU64Map", "Snapshot")
+
+_NATIVE_AGG_CFG: dict[str, dict[str, tuple[str, ...]]] = {
+    "NativeAggMap": {
+        "methods": ("Add", "ToMap", "ToU64Map", "Snapshot"),
+        "push_prefixes": ("AggPush_",),
+    },
+    "NativeAggStrMap": {
+        "methods": ("Add", "ToMap", "Snapshot"),
+        "push_prefixes": ("AggPushStr_",),
+    },
+}
 
 
 def _strip_comments_and_strings(text: str) -> str:
@@ -96,40 +106,47 @@ def extract_runquery_body(source: str) -> str | None:
     return None
 
 
-def _collect_holders(clean: str) -> set[str]:
+def _collect_holders(clean: str, agg_type: str) -> set[str]:
     holders: set[str] = set()
-    for m in re.finditer(rf"{_VAR_DECL}\s*:\s*NativeAggMap\b", clean):
+    for m in re.finditer(rf"{_VAR_DECL}\s*:\s*{re.escape(agg_type)}\b", clean):
         holders.add(m.group(1))
     for m in re.finditer(
-        rf"{_VAR_DECL}\s*:=\s*new\s+NativeAggMap\s*\(\s*\)",
+        rf"{_VAR_DECL}\s*:=\s*new\s+{re.escape(agg_type)}\s*\(\s*\)",
         clean,
     ):
         holders.add(m.group(1))
     return holders
 
 
-def _native_agg_violations(body: str) -> list[str]:
+def _is_agg_push_callee(callee: str, push_prefixes: tuple[str, ...]) -> bool:
+    return any(callee.startswith(p) for p in push_prefixes)
+
+
+def _native_agg_violations(body: str, agg_type: str) -> list[str]:
+    cfg = _NATIVE_AGG_CFG[agg_type]
+    methods = cfg["methods"]
+    push_prefixes = cfg["push_prefixes"]
     clean = _strip_comments_and_strings(body)
     violations: list[str] = []
 
-    news = list(re.finditer(r"\bnew\s+NativeAggMap\s*\(\s*\)", clean))
+    news = list(re.finditer(rf"\bnew\s+{re.escape(agg_type)}\s*\(\s*\)", clean))
     if len(news) > 1:
-        violations.append(f"multiple NativeAggMap allocation ({len(news)} new)")
+        violations.append(f"multiple {agg_type} allocation ({len(news)} new)")
 
-    holders = _collect_holders(clean)
+    holders = _collect_holders(clean, agg_type)
 
     for m in re.finditer(rf"{_VAR_DECL}\s*:=\s*([A-Za-z_]\w*)\s*;", clean):
         name, rhs = m.group(1), m.group(2)
         if rhs in holders and name != rhs:
-            violations.append(f"NativeAggMap alias via var {name} := {rhs}")
+            violations.append(f"{agg_type} alias via var {name} := {rhs}")
 
     for m in re.finditer(
-        rf"{_VAR_DECL}\s*:\s*NativeAggMap\s*:=\s*([A-Za-z_]\w*)\s*;",
+        rf"{_VAR_DECL}\s*:\s*{re.escape(agg_type)}\s*:=\s*([A-Za-z_]\w*)\s*;",
         clean,
     ):
         name, rhs = m.group(1), m.group(2)
         if rhs in holders and name != rhs:
-            violations.append(f"NativeAggMap alias via var {name}: NativeAggMap := {rhs}")
+            violations.append(f"{agg_type} alias via var {name}: {agg_type} := {rhs}")
 
     for m in re.finditer(
         r"\b([A-Za-z_]\w*(?:\.\w+|\[[^\]]+\])*)\s*:=\s*([A-Za-z_]\w*)\s*;",
@@ -137,22 +154,23 @@ def _native_agg_violations(body: str) -> list[str]:
     ):
         lhs, rhs = m.group(1), m.group(2)
         if rhs in holders and lhs != rhs:
-            violations.append(f"NativeAggMap alias via {lhs} := {rhs}")
+            violations.append(f"{agg_type} alias via {lhs} := {rhs}")
 
     for h in holders:
         if re.search(rf":=\s*\([^)]*\b{re.escape(h)}\b[^)]*\)", clean):
-            violations.append(f"NativeAggMap {h} stored in tuple")
+            violations.append(f"{agg_type} {h} stored in tuple")
         if re.search(rf":=\s*\[[^\]]*\b{re.escape(h)}\b[^\]]*\]", clean):
-            violations.append(f"NativeAggMap {h} stored in array")
+            violations.append(f"{agg_type} {h} stored in array")
 
+    method_pat = "|".join(re.escape(m) for m in methods)
     for m in re.finditer(
-        r"\b([A-Za-z_]\w*(?:\.\w+|\.\d+)*)\.(Add|ToMap|ToU64Map|Snapshot)\(",
+        rf"\b([A-Za-z_]\w*(?:\.\w+|\.\d+)*)\.({method_pat})\(",
         clean,
     ):
         recv, method = m.group(1), m.group(2)
         if recv not in holders:
             violations.append(
-                f"NativeAggMap.{method} called on {recv} (not linear holder)"
+                f"{agg_type}.{method} called on {recv} (not linear holder)"
             )
 
     for h in holders:
@@ -160,7 +178,7 @@ def _native_agg_violations(body: str) -> list[str]:
             callee = m.group(1)
             if callee in ("if", "while", "assert", "print", "forall", "exists"):
                 continue
-            if callee.startswith("AggPush_"):
+            if _is_agg_push_callee(callee, push_prefixes):
                 continue
             start = m.end()
             depth, j = 1, start
@@ -172,11 +190,10 @@ def _native_agg_violations(body: str) -> list[str]:
                 j += 1
             args = clean[start : j - 1]
             if re.search(rf"\b{re.escape(h)}\b", args):
-                if callee in _NATIVE_AGG_METHODS and args.strip().startswith(h):
+                if callee in methods and args.strip().startswith(h):
                     continue
-                violations.append(f"NativeAggMap {h} passed to {callee}(...)")
+                violations.append(f"{agg_type} {h} passed to {callee}(...)")
 
-    # Stable dedupe while preserving order.
     seen: set[str] = set()
     out: list[str] = []
     for v in violations:
@@ -186,13 +203,18 @@ def _native_agg_violations(body: str) -> list[str]:
     return out
 
 
-def admit_runquery(source: str, *, strict: bool = True) -> AdmissionResult:
-    """Check RunQuery admission before dafny verify.
+def _detect_native_agg_types(clean: str) -> list[str]:
+    used: list[str] = []
+    for agg_type in _NATIVE_AGG_CFG:
+        if re.search(rf"\b{re.escape(agg_type)}\b", clean) or re.search(
+            rf"\bnew\s+{re.escape(agg_type)}\s*\(", clean
+        ):
+            used.append(agg_type)
+    return used
 
-    Default is strict (fail closed): any NativeAggMap linearity violation rejects
-    the query. Do not pass strict=False in production pipelines — it allows SLOW
-    paths that skip fast postprocessor rewrites but still admits aliasing shapes.
-    """
+
+def admit_runquery(source: str, *, strict: bool = True) -> AdmissionResult:
+    """Check RunQuery admission before dafny verify."""
     bodies = _extract_runquery_bodies(source)
     if not bodies:
         return AdmissionResult(
@@ -209,24 +231,26 @@ def admit_runquery(source: str, *, strict: bool = True) -> AdmissionResult:
 
     body = bodies[0]
     clean = _strip_comments_and_strings(body)
-    uses_agg = bool(
-        re.search(r"\bNativeAggMap\b", clean)
-        or re.search(r"\bnew\s+NativeAggMap\s*\(", clean)
-    )
-    if not uses_agg:
+    agg_types = _detect_native_agg_types(clean)
+    if not agg_types:
         return AdmissionResult(ok=True, native_agg=NativeAggMode.NONE, violations=[])
 
-    violations = _native_agg_violations(body)
-    if violations:
-        mode = NativeAggMode.SLOW
-        ok = not strict
-        return AdmissionResult(ok=ok, native_agg=mode, violations=violations)
+    violations: list[str] = []
+    if len(agg_types) > 1:
+        violations.append(f"multiple native agg types in RunQuery: {', '.join(agg_types)}")
 
-    if not re.search(r"\bnew\s+NativeAggMap\s*\(\s*\)", clean):
+    for agg_type in agg_types:
+        violations.extend(_native_agg_violations(body, agg_type))
+        if not re.search(rf"\bnew\s+{re.escape(agg_type)}\s*\(\s*\)", clean):
+            violations.append(
+                f"{agg_type} type referenced but no single new {agg_type}()"
+            )
+
+    if violations:
         return AdmissionResult(
             ok=not strict,
             native_agg=NativeAggMode.SLOW,
-            violations=["NativeAggMap type referenced but no single new NativeAggMap()"],
+            violations=violations,
         )
 
     return AdmissionResult(ok=True, native_agg=NativeAggMode.FAST, violations=[])

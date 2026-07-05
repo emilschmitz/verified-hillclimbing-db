@@ -306,10 +306,14 @@ def build_verified(q: int) -> Path:
     if bin_path.is_file():
         return bin_path
 
+    from sql_transpiler import project_schema_for_query
+
     runquery = RUNQUERIES[q]
     catalog = DatabaseCatalog()
     schema = catalog.get_table_schema("lineorder_flat")
-    spec = transpile_sql_to_dafny_columnar(queries[q - 1], schema)
+    sql = queries[q - 1]
+    query_schema = project_schema_for_query(sql, schema)
+    spec = transpile_sql_to_dafny_columnar(sql, query_schema)
     src = f'{spec}\n\n{runquery}\n\nmethod {{:verify false}} Main() {{ print "SUCCESS\\n"; }}\n'
 
     work = BUILD / f"q{q}"
@@ -318,7 +322,7 @@ def build_verified(q: int) -> Path:
     dfy = work / "q.dfy"
     cols_rs = work / "cols_native.rs"
     dfy.write_text(src)
-    cols_rs.write_text(generate_cols_native_rs(schema, sql_str=queries[q - 1]))
+    cols_rs.write_text(generate_cols_native_rs(query_schema, sql_str=sql))
 
     admission = admit_runquery(src)
     if not admission.ok:

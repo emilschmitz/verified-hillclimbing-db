@@ -28,6 +28,17 @@ class DatabaseCatalog:
         self._ensure_connection()
         schema_dict = {}
 
+        # Workload schemas (bootstrap without DuckDB) — before generic DDL parse.
+        if table_name.lower() == "lineorder_flat":
+            from research_loop.ssb_workload import schema as ssb_schema, fallback_dtypes
+            return {
+                col: (fallback_dtypes.get(col, "INTEGER") if t == "int" else "VARCHAR")
+                for col, t in ssb_schema.items()
+            }
+        if table_name.lower() == "lineitem":
+            from research_loop.tpch_workload import schema as tpch_schema
+            return dict(tpch_schema)
+
         if self.con:
             try:
                 # Query INFORMATION_SCHEMA.COLUMNS
@@ -55,14 +66,6 @@ class DatabaseCatalog:
         # Kept as bootstrap for environments without a live DuckDB connection
         # (e.g. running the unit tests offline).  New tables should be
         # loaded into DuckDB instead of adding to this fallback.
-        if table_name.lower() == "lineorder_flat":
-            from research_loop.ssb_workload import schema as ssb_schema, fallback_dtypes
-            # Down-convert the high-level 'int'/'string' shape to concrete
-            # DuckDB types so the transpiler's get_dafny_type can pick the
-            # right width from the type, not the column name.
-            return {col: (fallback_dtypes.get(col, "INTEGER") if t == "int" else "VARCHAR")
-                    for col, t in ssb_schema.items()}
-
         return {}
 
     def get_primary_keys(self, table_name: str) -> list[str]:
