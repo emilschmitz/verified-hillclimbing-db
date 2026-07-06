@@ -1,6 +1,6 @@
 # Lemma
 
-Verified query synthesis: SQL is transpiled to a Dafny spec, an agent (or mock) writes an optimized `RunQuery`, Dafny/Z3 proves correctness, and the result is compiled to native Rust. Contains a DuckDB extension where optimized binaries are cached and invoked on rerun.
+Verified query synthesis: SQL is transpiled to a Dafny spec, an agent (or mock) writes an optimized `RunQuery`, Dafny (Z3) proves correctness, and the result is compiled to native Rust. Contains a DuckDB extension where optimized binaries are cached and invoked on rerun (WIP).
 
 https://github.com/user-attachments/assets/7f7891c7-5ef6-406b-882b-8e01134ed37c
 
@@ -51,4 +51,4 @@ Latency on SSB flat (1.5M rows) and TPC-H SF1 (6M rows), running on mid-range 20
 
 Row counts under query labels on chart.
 
-Optimization wins vary widely by query shape. Verified Rust is strongest on selective scans and native hash aggregation — tight loops with fixed-width ops where DuckDB’s generic vector path is overhead. It usually still sits above bare Rust: Dafny codegen favors prover-friendly constructs (`Object` wrappers, maps, unbounded ints) unless the agent routes the hot path through native externs.
+Optimization wins vary by query structure. Custom Rust is strongest on selective scans and native hash aggregation, circumventing the somewhat fixed overhead of DuckDB’s generic multi-step path. The Dafny step adds a bare Rust; Dafny codegen favors prover-friendly constructs.
