@@ -51,14 +51,4 @@ Latency on SSB flat (1.5M rows) and TPC-H SF1 (6M rows), running on mid-range 20
 
 Row counts under query labels on chart.
 
-### Notes
-
-SSB Q1 — Native mul/add on a narrow column load; lags bare on per-row runtime wrapper overhead.
-
-SSB Q2/Q3 — Tight filter + native arithmetic; DuckDB loses on vector/interpreter setup for tiny per-row work.
-
-TPC-H Q1 — Native string hash agg vs DuckDB general group-by; bare still wins on less ghost/API overhead.
-
-TPC-H Q6 — Heavy filter early; proof cost drowned out, native mul/add on surviving rows.
-
-Dafny output is prover-friendly and LLVM-hostile. We steer hot paths toward **native externs** (e.g. `NativeAggMap`, fixed-width ops) to approach bare Rust speed; `admit_runquery` lints that the agent uses them correctly.
+Optimization wins vary widely by query shape. Verified Rust is strongest on selective scans and native hash aggregation — tight loops with fixed-width ops where DuckDB’s generic vector path is overhead. It usually still sits above bare Rust: Dafny codegen favors prover-friendly constructs (`Object` wrappers, maps, unbounded ints) unless the agent routes the hot path through native externs.
