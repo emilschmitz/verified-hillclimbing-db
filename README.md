@@ -53,34 +53,12 @@ Row counts under query labels on chart.
 
 ### Notes
 
-SSB Q1 (revenue sum, 1.5M rows) — Verified ~28% faster than DuckDB (~8 ms vs ~11 ms) but ~1.7× slower than bare (~5 ms). Gain vs DuckDB: projected columns + native `MulU64U32`/`AddU64` in the inner loop instead of DuckDB’s generic vector path on a wide flat table. Gap vs bare: `Object<ColsNative>` indexing and the verified runtime wrapper on every row.
+SSB Q1 — Native mul/add on a narrow column load; lags bare on per-row runtime wrapper overhead.
 
-SSB Q2 (selective scalar sum, 1.5M rows) — Verified ~10× faster than DuckDB and essentially tied with bare (~1.6 ms). Almost no allocation; the loop is a tight filter + native arithmetic that LLVM can fuse. DuckDB pays interpreter/vector setup on a query that does very little work per matching row.
+SSB Q2/Q3 — Tight filter + native arithmetic; DuckDB loses on vector/interpreter setup for tiny per-row work.
 
-SSB Q3 (another selective sum, 1.5M rows) — Same pattern as Q2: ~2.7× faster than DuckDB, near bare (~2.2 ms). Native integer ops + minimal column footprint.
+TPC-H Q1 — Native string hash agg vs DuckDB general group-by; bare still wins on less ghost/API overhead.
 
-TPC-H Q1 (two-key string group-by, ~6M rows) — Verified ~14× faster than DuckDB (~35 ms vs ~480 ms) but ~1.3× slower than bare (~27 ms). Gain vs DuckDB: `NativeAggStrMap` + schema-driven `AggPushStr_*` — hash aggregation stays in Rust instead of DuckDB’s general group-by. Gap vs bare: ghost map bookkeeping in Dafny codegen and string-key hashing through the verified API.
+TPC-H Q6 — Heavy filter early; proof cost drowned out, native mul/add on surviving rows.
 
-TPC-H Q6 (filtered revenue sum, ~6M rows) — Verified ~1.8× faster than DuckDB and slightly faster than bare (~37 ms vs ~41 ms / ~65 ms DuckDB). Selective scan with native mul/add; proof overhead is negligible when most rows are filtered early.
-
-### From verified Dafny to fast Rust
-
-Naive Dafny output is correct but slow: unbounded `int`/`nat`, functional `map` group-bys, sequence comprehensions, and `Object`/`Seq` wrappers everywhere — easy for Z3 prover, bad for LLVM. The pipeline optimizes the Dafny->Rust translation without breaking the proof:
-
-- SQL → `MethodSpec` — deterministic transpile; the agent only edits `RunQuery` under fixed `requires ValidCols` / `ensures res == MethodSpec(cols)`.
-- Native externs — `NativeU32`/`NativeU64`/`NativeI64`, `AddU64`, `MulU64U32`, etc., so hot arithmetic stays fixed-width in Rust.
-- Native aggregation — `NativeAggMap` / `NativeAggStrMap` + schema-driven `AggPush_*` replace Dafny `map` updates in group-by queries (TPC-H Q1, SSB Q4/Q5).
-- Column projection — load only columns the query touches (same footprint as bare baseline).
-- Postprocessor — forward scan, drop dead ghost tuples, `BenchFinish()` skips `ToMap()` materialization at the engine boundary.
-- Validation — Dafny/Z3 proves `RunQuery` refines `MethodSpec`; Rust is Dafny-translated + postprocessed; benchmark harness checks result equality against DuckDB on sampled runs.
-
-Dafny will always prefer verified constructs over fast ones — maps over hash tables, mathematical integers over machine words — so the agent and postprocessor must steer hot paths toward native externs; the proof contract stays the same.
-
-Reproduce the chart:
-
-```bash
-uv run python research_loop/benchmark_scaling.py --refresh-queries 1,2,3
-uv run python research_loop/benchmark_tpch.py
-uv run python scripts/generate_benchmark_overview_plot.py
-uv run python research_loop/benchmark_verified.py # single-point check at 50k rows
-```
+Dafny output is prover-friendly and LLVM-hostile. We steer hot paths toward **native externs** (e.g. `NativeAggMap`, fixed-width ops) to approach bare Rust speed; `admit_runquery` lints that the agent uses them correctly.
