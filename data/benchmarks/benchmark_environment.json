@@ -1,0 +1,29 @@
+{
+  "description": "Execution environment for hot-loop benchmarks (README overview plot, scaling_results.json, tpch_sf1_results.json)",
+  "hostname": "LAPTOP-7489BUT1",
+  "os": "Linux 6.6.87.2-microsoft-standard-WSL2 (WSL2 on Windows)",
+  "cpu": "AMD Ryzen AI 5 330 w/ Radeon 820M",
+  "cpu_cores": 4,
+  "cpu_threads": 8,
+  "ram_gib": 5.8,
+  "rust_flags": "-C target-cpu=native",
+  "datasets": {
+    "ssb_lineorder_flat": {
+      "path": "data/ssb-dbgen/lineorder_flat.tbl",
+      "overview_row_count": 1500000
+    },
+    "tpch_lineitem_sf1": {
+      "path": "data/tpch-sf1/lineitem.tbl",
+      "row_count": 6001215
+    }
+  },
+  "engines_single_thread": {
+    "duckdb": "PRAGMA threads=1",
+    "postgresql": "max_parallel_workers_per_gather=0",
+    "bare_rust": "no OpenMP; median of timed loop iterations (projected columns)",
+    "verified_rust": "no OpenMP; median of timed RunQuery iterations; Dafny→Rust + postprocessor"
+  },
+  "metric_name": "hot-loop latency",
+  "metric_field": "hot_us",
+  "metric_definition": "Microseconds for the median timed query-loop execution after warm-up; table/column load is outside the timer."
+}

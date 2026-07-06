@@ -526,14 +526,14 @@ fn main() {{
     use std::time::Instant;
 {main_args}
     let cols = load_cols_from_tbl(tbl, limit);
-    for run in 0..3 {{
+    let mut times = [0u128; 5];
+    for slot in &mut times {{
         let t0 = Instant::now();
         let _ = crate::_module::_default::RunQuery(&cols);
-        let dt = t0.elapsed().as_micros();
-        if run == 2 {{
-            println!("QUERY_LATENCY_US: {{}}", dt);
-        }}
+        *slot = t0.elapsed().as_micros();
     }}
+    times.sort();
+    println!("QUERY_LATENCY_US: {{}}", times[times.len() / 2]);
 }}
 """
     else:
@@ -549,14 +549,14 @@ fn main() {{
     use std::time::Instant;
 {main_args}
     let data = crate::dataset::load_dataset::<crate::_module::Row>(tbl, limit);
-    for run in 0..3 {{
+    let mut times = [0u128; 5];
+    for slot in &mut times {{
         let t0 = Instant::now();
         let _ = crate::_module::_default::RunQuery(&data);
-        let dt = t0.elapsed().as_micros();
-        if run == 2 {{
-            println!("QUERY_LATENCY_US: {{}}", dt);
-        }}
+        *slot = t0.elapsed().as_micros();
     }}
+    times.sort();
+    println!("QUERY_LATENCY_US: {{}}", times[times.len() / 2]);
 }}
 """
     with open(file_path, "w") as f:

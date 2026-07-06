@@ -9,26 +9,26 @@
   "queries": {
     "Q1": {
       "sql": "SELECT l_returnflag, l_linestatus, SUM(l_quantity) AS sum_qty\nFROM lineitem\nWHERE l_shipdate <= 19980902\nGROUP BY l_returnflag, l_linestatus",
-      "duckdb_1t_us": 208386,
-      "duckdb_mt_us": 180825,
-      "bare_rust_us": 31319,
+      "duckdb_1t_us": 479491,
+      "duckdb_mt_us": 448968,
+      "bare_rust_us": 27283,
       "verified_rust": {
-        "hot_us": 62706,
-        "wall_s": 8.246,
+        "hot_us": 34956,
+        "wall_s": 24.103,
         "rows": 6001215,
-        "cached": false
+        "cached": true
       }
     },
     "Q6": {
       "sql": "SELECT SUM(l_extendedprice * l_discount) AS revenue\nFROM lineitem\nWHERE l_quantity >= 1 AND l_quantity <= 50\n  AND l_discount >= 1 AND l_discount <= 5\n  AND l_shipdate >= 19960101 AND l_shipdate <= 19961231",
-      "duckdb_1t_us": 34361,
-      "duckdb_mt_us": 26829,
-      "bare_rust_us": 38953,
+      "duckdb_1t_us": 64959,
+      "duckdb_mt_us": 55917,
+      "bare_rust_us": 40817,
       "verified_rust": {
-        "hot_us": 44966,
-        "wall_s": 3.184,
+        "hot_us": 36800,
+        "wall_s": 3.44,
         "rows": 6001215,
-        "cached": false
+        "cached": true
       }
     }
   }

@@ -1,4 +1,6 @@
 //! Hand-tuned bare Rust for SSB flat queries (no Dafny). Usage: bench_q <idx> <tbl> [limit]
+//!
+//! Loads only columns each query reads (matches verified column projection).
 
 use std::collections::HashMap;
 use std::env;
@@ -6,225 +8,293 @@ use std::fs::File;
 use std::io::{BufRead, BufReader};
 use std::time::Instant;
 
-struct Cols {
-    lo_orderdate: Vec<u32>,
-    lo_discount: Vec<u32>,
-    lo_quantity: Vec<u32>,
-    lo_extendedprice: Vec<u64>,
-    lo_revenue: Vec<u64>,
-    lo_supplycost: Vec<u64>,
-    d_year: Vec<u32>,
-    d_weeknuminyear: Vec<u32>,
-    p_brand: Vec<String>,
-    p_size: Vec<u32>,
-    p_category: Vec<String>,
-    p_mfgr: Vec<String>,
-    c_region: Vec<String>,
-    c_nation: Vec<String>,
-    c_city: Vec<String>,
-    s_region: Vec<String>,
-    s_nation: Vec<String>,
-    s_city: Vec<String>,
+fn strip_quotes(s: &str) -> &str {
+    s.trim_matches('"')
 }
 
-fn strip_quotes(s: &str) -> String {
-    s.trim_matches('"').to_string()
+use std::io::Read;
+
+fn u32_at(idx: &HashMap<String, usize>, fields: &[&str], name: &str) -> u32 {
+    fields
+        .get(*idx.get(name).expect("missing col"))
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(0)
 }
 
-fn load(tbl_path: &str, limit: usize) -> Cols {
-    let f = File::open(tbl_path).expect("open .tbl");
-    let mut rdr = BufReader::new(f);
-    let mut hdr = String::new();
-    rdr.read_line(&mut hdr).unwrap();
-    let mut idx: HashMap<String, usize> = HashMap::new();
-    for (i, c) in hdr.split('|').enumerate() {
-        idx.insert(c.trim().to_uppercase(), i);
+fn u64_at(idx: &HashMap<String, usize>, fields: &[&str], name: &str) -> u64 {
+    fields
+        .get(*idx.get(name).expect("missing col"))
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(0)
+}
+
+fn str_at(idx: &HashMap<String, usize>, fields: &[&str], name: &str) -> String {
+    let s = fields.get(*idx.get(name).expect("missing col")).copied().unwrap_or("");
+    strip_quotes(s).to_string()
+}
+
+struct TableLoader {
+    rdr: BufReader<File>,
+    idx: HashMap<String, usize>,
+}
+
+impl TableLoader {
+    fn open(tbl: &str) -> Self {
+        let f = File::open(tbl).expect("open .tbl");
+        let mut rdr = BufReader::new(f);
+        let mut hdr = String::new();
+        rdr.read_line(&mut hdr).unwrap();
+        let mut idx = HashMap::new();
+        for (i, c) in hdr.split('|').enumerate() {
+            idx.insert(c.trim().to_uppercase(), i);
+        }
+        Self { rdr, idx }
     }
-    let col = |name: &str| *idx.get(name).expect("missing col");
 
-    let mut out = Cols {
-        lo_orderdate: Vec::new(),
-        lo_discount: Vec::new(),
-        lo_quantity: Vec::new(),
-        lo_extendedprice: Vec::new(),
-        lo_revenue: Vec::new(),
-        lo_supplycost: Vec::new(),
-        d_year: Vec::new(),
-        d_weeknuminyear: Vec::new(),
-        p_brand: Vec::new(),
-        p_size: Vec::new(),
-        p_category: Vec::new(),
-        p_mfgr: Vec::new(),
-        c_region: Vec::new(),
-        c_nation: Vec::new(),
-        c_city: Vec::new(),
-        s_region: Vec::new(),
-        s_nation: Vec::new(),
-        s_city: Vec::new(),
-    };
-
-    for line in rdr.lines().take(limit) {
-        let line = line.unwrap();
-        let f: Vec<&str> = line.split('|').collect();
-        let u32_at = |i: usize| f.get(i).and_then(|s| s.parse().ok()).unwrap_or(0);
-        let u64_at = |i: usize| f.get(i).and_then(|s| s.parse().ok()).unwrap_or(0);
-        let str_at = |i: usize| -> String {
-            f.get(i).map(|s| strip_quotes(s)).unwrap_or_default()
-        };
-
-        out.lo_orderdate.push(u32_at(col("LO_ORDERDATE")));
-        out.lo_discount.push(u32_at(col("LO_DISCOUNT")));
-        out.lo_quantity.push(u32_at(col("LO_QUANTITY")));
-        out.lo_extendedprice.push(u64_at(col("LO_EXTENDEDPRICE")));
-        out.lo_revenue.push(u64_at(col("LO_REVENUE")));
-        out.lo_supplycost.push(u64_at(col("LO_SUPPLYCOST")));
-        out.d_year.push(u32_at(col("D_YEAR")));
-        out.d_weeknuminyear.push(u32_at(col("D_WEEKNUMINYEAR")));
-        out.p_brand.push(str_at(col("P_BRAND")));
-        out.p_size.push(u32_at(col("P_SIZE")));
-        out.p_category.push(str_at(col("P_CATEGORY")));
-        out.p_mfgr.push(str_at(col("P_MFGR")));
-        out.c_region.push(str_at(col("C_REGION")));
-        out.c_nation.push(str_at(col("C_NATION")));
-        out.c_city.push(str_at(col("C_CITY")));
-        out.s_region.push(str_at(col("S_REGION")));
-        out.s_nation.push(str_at(col("S_NATION")));
-        out.s_city.push(str_at(col("S_CITY")));
+    fn read_rows<F>(&mut self, limit: usize, mut row: F)
+    where
+        F: FnMut(&HashMap<String, usize>, &[&str]),
+    {
+        for line in self.rdr.by_ref().lines().take(limit) {
+            let line = line.unwrap();
+            let fields: Vec<&str> = line.split('|').collect();
+            if fields.is_empty() {
+                continue;
+            }
+            row(&self.idx, &fields);
+        }
     }
-    out
 }
 
 fn time_loop<F: FnMut()>(mut f: F) {
-    for run in 0..3 {
+    let mut times = [0u128; 5];
+    for t in &mut times {
         let t0 = Instant::now();
         f();
-        let dt = t0.elapsed().as_micros();
-        if run == 2 {
-            println!("QUERY_LATENCY_US: {}", dt);
-        }
+        *t = t0.elapsed().as_micros();
     }
+    times.sort();
+    println!("QUERY_LATENCY_US: {}", times[times.len() / 2]);
 }
 
-fn run_q1(c: &Cols) {
+fn run_q1(tbl: &str, limit: usize) {
+    let mut ld = TableLoader::open(tbl);
+    let mut lo_orderdate = Vec::with_capacity(limit);
+    let mut lo_discount = Vec::with_capacity(limit);
+    let mut lo_quantity = Vec::with_capacity(limit);
+    let mut lo_extendedprice = Vec::with_capacity(limit);
+    ld.read_rows(limit, |idx, f| {
+        lo_orderdate.push(u32_at(idx, f, "LO_ORDERDATE"));
+        lo_discount.push(u32_at(idx, f, "LO_DISCOUNT"));
+        lo_quantity.push(u32_at(idx, f, "LO_QUANTITY"));
+        lo_extendedprice.push(u64_at(idx, f, "LO_EXTENDEDPRICE"));
+    });
+    let n = lo_orderdate.len();
     time_loop(|| {
         let mut acc: u64 = 0;
-        for i in 0..c.lo_orderdate.len() {
-            let od = c.lo_orderdate[i];
-            let disc = c.lo_discount[i];
-            let qty = c.lo_quantity[i];
-            if (1_993_0101..=1_993_1231).contains(&od)
-                && (1..=3).contains(&disc)
-                && qty < 25
-            {
-                acc = acc.wrapping_add(c.lo_extendedprice[i].wrapping_mul(disc as u64));
+        for i in 0..n {
+            let od = lo_orderdate[i];
+            let disc = lo_discount[i];
+            let qty = lo_quantity[i];
+            if od >= 1_993_0101 && od <= 1_993_1231 && disc >= 1 && disc <= 3 && qty < 25 {
+                acc = acc.wrapping_add(lo_extendedprice[i].wrapping_mul(disc as u64));
             }
         }
         std::hint::black_box(acc);
     });
 }
 
-fn run_q2(c: &Cols) {
+fn run_q2(tbl: &str, limit: usize) {
+    let mut ld = TableLoader::open(tbl);
+    let mut lo_orderdate = Vec::with_capacity(limit);
+    let mut lo_discount = Vec::with_capacity(limit);
+    let mut lo_quantity = Vec::with_capacity(limit);
+    let mut lo_extendedprice = Vec::with_capacity(limit);
+    ld.read_rows(limit, |idx, f| {
+        lo_orderdate.push(u32_at(idx, f, "LO_ORDERDATE"));
+        lo_discount.push(u32_at(idx, f, "LO_DISCOUNT"));
+        lo_quantity.push(u32_at(idx, f, "LO_QUANTITY"));
+        lo_extendedprice.push(u64_at(idx, f, "LO_EXTENDEDPRICE"));
+    });
+    let n = lo_orderdate.len();
     time_loop(|| {
         let mut acc: u64 = 0;
-        for i in 0..c.lo_orderdate.len() {
-            let od = c.lo_orderdate[i];
-            let disc = c.lo_discount[i];
-            let qty = c.lo_quantity[i];
-            if (1_994_0101..=1_994_0131).contains(&od)
-                && (4..=6).contains(&disc)
-                && (26..=35).contains(&qty)
-            {
-                acc = acc.wrapping_add(c.lo_extendedprice[i].wrapping_mul(disc as u64));
+        for i in 0..n {
+            let od = lo_orderdate[i];
+            let disc = lo_discount[i];
+            let qty = lo_quantity[i];
+            if od >= 1_994_0101 && od <= 1_994_0131 && disc >= 4 && disc <= 6 && qty >= 26 && qty <= 35 {
+                acc = acc.wrapping_add(lo_extendedprice[i].wrapping_mul(disc as u64));
             }
         }
         std::hint::black_box(acc);
     });
 }
 
-fn run_q3(c: &Cols) {
+fn run_q3(tbl: &str, limit: usize) {
+    let mut ld = TableLoader::open(tbl);
+    let mut d_weeknuminyear = Vec::with_capacity(limit);
+    let mut d_year = Vec::with_capacity(limit);
+    let mut lo_discount = Vec::with_capacity(limit);
+    let mut lo_quantity = Vec::with_capacity(limit);
+    let mut lo_extendedprice = Vec::with_capacity(limit);
+    ld.read_rows(limit, |idx, f| {
+        d_weeknuminyear.push(u32_at(idx, f, "D_WEEKNUMINYEAR"));
+        d_year.push(u32_at(idx, f, "D_YEAR"));
+        lo_discount.push(u32_at(idx, f, "LO_DISCOUNT"));
+        lo_quantity.push(u32_at(idx, f, "LO_QUANTITY"));
+        lo_extendedprice.push(u64_at(idx, f, "LO_EXTENDEDPRICE"));
+    });
+    let n = d_year.len();
     time_loop(|| {
         let mut acc: u64 = 0;
-        for i in 0..c.lo_orderdate.len() {
-            let disc = c.lo_discount[i];
-            let qty = c.lo_quantity[i];
-            if c.d_weeknuminyear[i] == 6
-                && c.d_year[i] == 1994
-                && (5..=7).contains(&disc)
-                && (26..=35).contains(&qty)
+        for i in 0..n {
+            if d_weeknuminyear[i] == 6
+                && d_year[i] == 1994
+                && lo_discount[i] >= 5
+                && lo_discount[i] <= 7
+                && lo_quantity[i] >= 26
+                && lo_quantity[i] <= 35
             {
-                acc = acc.wrapping_add(c.lo_extendedprice[i].wrapping_mul(disc as u64));
+                acc = acc.wrapping_add(lo_extendedprice[i].wrapping_mul(lo_discount[i] as u64));
             }
         }
         std::hint::black_box(acc);
     });
 }
 
-fn run_q4(c: &Cols) {
+fn run_q4(tbl: &str, limit: usize) {
+    let mut ld = TableLoader::open(tbl);
+    let mut d_year = Vec::with_capacity(limit);
+    let mut p_brand = Vec::with_capacity(limit);
+    let mut p_category = Vec::with_capacity(limit);
+    let mut s_region = Vec::with_capacity(limit);
+    let mut lo_revenue = Vec::with_capacity(limit);
+    ld.read_rows(limit, |idx, f| {
+        d_year.push(u32_at(idx, f, "D_YEAR"));
+        p_brand.push(str_at(idx, f, "P_BRAND"));
+        p_category.push(str_at(idx, f, "P_CATEGORY"));
+        s_region.push(str_at(idx, f, "S_REGION"));
+        lo_revenue.push(u64_at(idx, f, "LO_REVENUE"));
+    });
+    let n = d_year.len();
     time_loop(|| {
         let mut acc: HashMap<(u32, String), u64> = HashMap::new();
-        for i in 0..c.lo_orderdate.len() {
-            if c.p_category[i] == "MFGR#12" && c.s_region[i] == "AMERICA" {
-                let key = (c.d_year[i], c.p_brand[i].clone());
-                *acc.entry(key).or_insert(0) += c.lo_revenue[i];
+        for i in 0..n {
+            if p_category[i] == "MFGR#12" && s_region[i] == "AMERICA" {
+                let key = (d_year[i], p_brand[i].clone());
+                *acc.entry(key).or_insert(0) += lo_revenue[i];
             }
         }
         std::hint::black_box(acc.len());
     });
 }
 
-fn run_q5(c: &Cols) {
+fn run_q5(tbl: &str, limit: usize) {
+    let mut ld = TableLoader::open(tbl);
+    let mut d_year = Vec::with_capacity(limit);
+    let mut p_brand = Vec::with_capacity(limit);
+    let mut p_size = Vec::with_capacity(limit);
+    let mut s_region = Vec::with_capacity(limit);
+    let mut lo_revenue = Vec::with_capacity(limit);
+    ld.read_rows(limit, |idx, f| {
+        d_year.push(u32_at(idx, f, "D_YEAR"));
+        p_brand.push(str_at(idx, f, "P_BRAND"));
+        p_size.push(u32_at(idx, f, "P_SIZE"));
+        s_region.push(str_at(idx, f, "S_REGION"));
+        lo_revenue.push(u64_at(idx, f, "LO_REVENUE"));
+    });
+    let n = d_year.len();
     time_loop(|| {
         let mut acc: HashMap<(u32, String), u64> = HashMap::new();
-        for i in 0..c.lo_orderdate.len() {
-            if c.p_brand[i] == "MFGR#2221" && c.p_size[i] >= 10 && c.s_region[i] == "ASIA" {
-                let key = (c.d_year[i], c.p_brand[i].clone());
-                *acc.entry(key).or_insert(0) += c.lo_revenue[i];
+        for i in 0..n {
+            if p_brand[i] == "MFGR#2221" && p_size[i] >= 10 && s_region[i] == "ASIA" {
+                let key = (d_year[i], p_brand[i].clone());
+                *acc.entry(key).or_insert(0) += lo_revenue[i];
             }
         }
         std::hint::black_box(acc.len());
     });
 }
 
-fn run_q6(c: &Cols) {
+fn run_q6(tbl: &str, limit: usize) {
+    let mut ld = TableLoader::open(tbl);
+    let mut d_year = Vec::with_capacity(limit);
+    let mut p_brand = Vec::with_capacity(limit);
+    let mut s_region = Vec::with_capacity(limit);
+    let mut lo_revenue = Vec::with_capacity(limit);
+    ld.read_rows(limit, |idx, f| {
+        d_year.push(u32_at(idx, f, "D_YEAR"));
+        p_brand.push(str_at(idx, f, "P_BRAND"));
+        s_region.push(str_at(idx, f, "S_REGION"));
+        lo_revenue.push(u64_at(idx, f, "LO_REVENUE"));
+    });
+    let n = d_year.len();
     time_loop(|| {
         let mut acc: HashMap<(u32, String), u64> = HashMap::new();
-        for i in 0..c.lo_orderdate.len() {
-            if c.p_brand[i] == "MFGR#2221" && c.s_region[i] == "EUROPE" {
-                let key = (c.d_year[i], c.p_brand[i].clone());
-                *acc.entry(key).or_insert(0) += c.lo_revenue[i];
+        for i in 0..n {
+            if p_brand[i] == "MFGR#2221" && s_region[i] == "EUROPE" {
+                let key = (d_year[i], p_brand[i].clone());
+                *acc.entry(key).or_insert(0) += lo_revenue[i];
             }
         }
         std::hint::black_box(acc.len());
     });
 }
 
-fn run_q10(c: &Cols) {
+fn run_q10(tbl: &str, limit: usize) {
+    let mut ld = TableLoader::open(tbl);
+    let mut lo_orderdate = Vec::with_capacity(limit);
+    let mut c_city = Vec::with_capacity(limit);
+    let mut s_city = Vec::with_capacity(limit);
+    let mut d_year = Vec::with_capacity(limit);
+    let mut lo_revenue = Vec::with_capacity(limit);
+    ld.read_rows(limit, |idx, f| {
+        lo_orderdate.push(u32_at(idx, f, "LO_ORDERDATE"));
+        c_city.push(str_at(idx, f, "C_CITY"));
+        s_city.push(str_at(idx, f, "S_CITY"));
+        d_year.push(u32_at(idx, f, "D_YEAR"));
+        lo_revenue.push(u64_at(idx, f, "LO_REVENUE"));
+    });
+    let n = lo_orderdate.len();
     time_loop(|| {
         let mut acc: HashMap<(String, String, u32), u64> = HashMap::new();
-        for i in 0..c.lo_orderdate.len() {
-            let od = c.lo_orderdate[i];
-            if c.c_city[i] == "UNITED KI1"
-                && c.s_city[i] == "UNITED KI5"
-                && (1_997_1201..=1_997_1231).contains(&od)
-            {
-                let key = (c.c_city[i].clone(), c.s_city[i].clone(), c.d_year[i]);
-                *acc.entry(key).or_insert(0) += c.lo_revenue[i];
+        for i in 0..n {
+            let od = lo_orderdate[i];
+            if c_city[i] == "UNITED KI1" && s_city[i] == "UNITED KI5" && od >= 1_997_1201 && od <= 1_997_1231 {
+                let key = (c_city[i].clone(), s_city[i].clone(), d_year[i]);
+                *acc.entry(key).or_insert(0) += lo_revenue[i];
             }
         }
         std::hint::black_box(acc.len());
     });
 }
 
-fn run_q11(c: &Cols) {
+fn run_q11(tbl: &str, limit: usize) {
+    let mut ld = TableLoader::open(tbl);
+    let mut d_year = Vec::with_capacity(limit);
+    let mut c_nation = Vec::with_capacity(limit);
+    let mut c_region = Vec::with_capacity(limit);
+    let mut s_region = Vec::with_capacity(limit);
+    let mut p_mfgr = Vec::with_capacity(limit);
+    let mut lo_revenue = Vec::with_capacity(limit);
+    let mut lo_supplycost = Vec::with_capacity(limit);
+    ld.read_rows(limit, |idx, f| {
+        d_year.push(u32_at(idx, f, "D_YEAR"));
+        c_nation.push(str_at(idx, f, "C_NATION"));
+        c_region.push(str_at(idx, f, "C_REGION"));
+        s_region.push(str_at(idx, f, "S_REGION"));
+        p_mfgr.push(str_at(idx, f, "P_MFGR"));
+        lo_revenue.push(u64_at(idx, f, "LO_REVENUE"));
+        lo_supplycost.push(u64_at(idx, f, "LO_SUPPLYCOST"));
+    });
+    let n = d_year.len();
     time_loop(|| {
         let mut acc: HashMap<(u32, String), i128> = HashMap::new();
-        for i in 0..c.lo_orderdate.len() {
-            if c.c_region[i] == "AMERICA"
-                && c.s_region[i] == "AMERICA"
-                && c.p_mfgr[i] == "MFGR#1"
-            {
-                let key = (c.d_year[i], c.c_nation[i].clone());
-                let v = c.lo_revenue[i] as i128 - c.lo_supplycost[i] as i128;
+        for i in 0..n {
+            if c_region[i] == "AMERICA" && s_region[i] == "AMERICA" && p_mfgr[i] == "MFGR#1" {
+                let key = (d_year[i], c_nation[i].clone());
+                let v = lo_revenue[i] as i128 - lo_supplycost[i] as i128;
                 *acc.entry(key).or_insert(0) += v;
             }
         }
@@ -232,18 +302,37 @@ fn run_q11(c: &Cols) {
     });
 }
 
-fn run_q13(c: &Cols) {
+fn run_q13(tbl: &str, limit: usize) {
+    let mut ld = TableLoader::open(tbl);
+    let mut lo_orderdate = Vec::with_capacity(limit);
+    let mut d_year = Vec::with_capacity(limit);
+    let mut s_nation = Vec::with_capacity(limit);
+    let mut c_region = Vec::with_capacity(limit);
+    let mut p_category = Vec::with_capacity(limit);
+    let mut lo_revenue = Vec::with_capacity(limit);
+    let mut lo_supplycost = Vec::with_capacity(limit);
+    ld.read_rows(limit, |idx, f| {
+        lo_orderdate.push(u32_at(idx, f, "LO_ORDERDATE"));
+        d_year.push(u32_at(idx, f, "D_YEAR"));
+        s_nation.push(str_at(idx, f, "S_NATION"));
+        c_region.push(str_at(idx, f, "C_REGION"));
+        p_category.push(str_at(idx, f, "P_CATEGORY"));
+        lo_revenue.push(u64_at(idx, f, "LO_REVENUE"));
+        lo_supplycost.push(u64_at(idx, f, "LO_SUPPLYCOST"));
+    });
+    let n = lo_orderdate.len();
     time_loop(|| {
         let mut acc: HashMap<(u32, String, String), i128> = HashMap::new();
-        for i in 0..c.lo_orderdate.len() {
-            let od = c.lo_orderdate[i];
-            if c.c_region[i] == "AMERICA"
-                && c.s_nation[i] == "UNITED STATES"
-                && (1_997_0101..=1_997_1231).contains(&od)
-                && c.p_category[i] == "MFGR#14"
+        for i in 0..n {
+            let od = lo_orderdate[i];
+            if c_region[i] == "AMERICA"
+                && s_nation[i] == "UNITED STATES"
+                && od >= 1_997_0101
+                && od <= 1_997_1231
+                && p_category[i] == "MFGR#14"
             {
-                let key = (c.d_year[i], c.s_nation[i].clone(), c.p_category[i].clone());
-                let v = c.lo_revenue[i] as i128 - c.lo_supplycost[i] as i128;
+                let key = (d_year[i], s_nation[i].clone(), p_category[i].clone());
+                let v = lo_revenue[i] as i128 - lo_supplycost[i] as i128;
                 *acc.entry(key).or_insert(0) += v;
             }
         }
@@ -256,17 +345,16 @@ fn main() {
     let qidx: u32 = args.get(1).and_then(|s| s.parse().ok()).expect("usage: bench_q <idx> <tbl> [limit]");
     let tbl = args.get(2).map(|s| s.as_str()).unwrap_or("ssb-dbgen/lineorder_flat.tbl");
     let limit: usize = args.get(3).and_then(|s| s.parse().ok()).unwrap_or(50_000);
-    let cols = load(tbl, limit);
     match qidx {
-        1 => run_q1(&cols),
-        2 => run_q2(&cols),
-        3 => run_q3(&cols),
-        4 => run_q4(&cols),
-        5 => run_q5(&cols),
-        6 => run_q6(&cols),
-        10 => run_q10(&cols),
-        11 => run_q11(&cols),
-        13 => run_q13(&cols),
+        1 => run_q1(tbl, limit),
+        2 => run_q2(tbl, limit),
+        3 => run_q3(tbl, limit),
+        4 => run_q4(tbl, limit),
+        5 => run_q5(tbl, limit),
+        6 => run_q6(tbl, limit),
+        10 => run_q10(tbl, limit),
+        11 => run_q11(tbl, limit),
+        13 => run_q13(tbl, limit),
         _ => panic!("unsupported query index {qidx}"),
     }
 }

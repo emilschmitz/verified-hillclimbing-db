@@ -51,7 +51,7 @@ VERIFIED_CACHE = DATA_DIR / "verified_bins"
 QUERIES = [1, 2, 3, 4, 5]
 MAX_ROWS = 1_500_000
 MIN_ROWS = 5_000
-WARM_RUNS = 3  # report last run (same as bench_q time_loop)
+WARM_RUNS = 5  # median of 5 timed iterations (bare + verified binaries)
 
 PG_CONTAINER = "lemma-bench-pg"
 PG_IMAGE = "postgres:16"
@@ -125,21 +125,22 @@ def run(cmd: list[str], *, cwd: Path | None = None, timeout: int = 300, env: dic
 
 
 def ensure_bare_binary() -> None:
-    if BARE_BIN.is_file():
-        return
-    r = run(["cargo", "build", "--release", "--bin", "bench_q"], cwd=BENCH_BARE, timeout=300)
+    env = os.environ.copy()
+    env["RUSTFLAGS"] = "-C target-cpu=native"
+    r = run(["cargo", "build", "--release", "--bin", "bench_q"], cwd=BENCH_BARE, timeout=300, env=env)
     if r.returncode != 0:
         raise RuntimeError(f"bench_q build failed:\n{r.stderr}")
 
 
 def hot_loop_third(run_fn) -> tuple[int, list[int]]:
-    """Run 3 timed iterations; return (3rd_us, all_us)."""
+    """Run timed iterations; return (median_us, all_us)."""
     times: list[int] = []
     for _ in range(WARM_RUNS):
         t0 = time.perf_counter()
         run_fn()
         times.append(int((time.perf_counter() - t0) * 1_000_000))
-    return times[-1], times
+    times.sort()
+    return times[len(times) // 2], times
 
 
 def duckdb_session(limit: int, threads: int | None) -> tuple[object, float]:

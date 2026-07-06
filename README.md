@@ -50,28 +50,42 @@ SELECT lemma('SELECT SUM(LO_EXTENDEDPRICE * LO_DISCOUNT) FROM lineorder_flat WHE
 
 ## Results
 
-Hot-loop latency on SSB `lineorder_flat` at **1.5M rows**. All engines run **single-threaded** (DuckDB `threads=1`, PostgreSQL without parallel gather, Rust without OpenMP). Metric: 3rd timed execution of the query loop; load is outside the timer. Raw numbers: `data/benchmarks/scaling_results.json` — see also `docs/verified_benchmark_rundown.md`.
+Hot-loop latency on SSB `lineorder_flat` (**1.5M rows**) and TPC-H `lineitem` SF1 (**~6M rows**). All engines run **single-threaded** (DuckDB `threads=1`, PostgreSQL without parallel gather, Rust without OpenMP). The timed metric is **hot-loop latency** (`hot_us`): median of timed query-loop executions after warm-up, with table/column load **outside** the timer. Raw numbers: `data/benchmarks/scaling_results.json`, `data/benchmarks/tpch_sf1_results.json`. **Execution environment** (CPU, RAM, WSL): `data/benchmarks/benchmark_environment.json`. See also `docs/verified_benchmark_rundown.md`.
 
-![SSB Q1–Q5 overview: single-thread hot-loop latency](plots/benchmark_overview.png)
+![Benchmark overview: SSB Q1–Q3 + TPC-H Q1/Q6 hot-loop latency](plots/benchmark_overview.png)
 
-**Three queries where verified is strong** (✓ on chart — well ahead of DuckDB, often close to bare):
+Row counts appear under each query label on the chart.
 
-- **Q2 / Q3** — selective scalar `SUM` with native `AddU64` / `MulU64U32`; almost no allocation in the loop.
-- **Q5** — two-key `(year, brand)` group-by via schema-driven `AggPush_*` on `NativeAggMap`; beats DuckDB 1t, still ~1.3× slower than bare.
+### Per-query notes
 
-**Two queries where gains are modest** (~ on chart — verified ≈ DuckDB or worse, clearly behind bare):
+**SSB Q1** (revenue sum, 1.5M rows) — Verified **~28% faster than DuckDB** (~8 ms vs ~11 ms) but **~1.7× slower than bare** (~5 ms). Gain vs DuckDB: projected columns + native `MulU64U32`/`AddU64` in the inner loop instead of DuckDB’s generic vector path on a wide flat table. Gap vs bare: `Object<ColsNative>` indexing and the verified runtime wrapper on every row.
 
-- **Q1** — simple revenue sum but enough row traffic that runtime wrapper overhead shows; verified slightly **slower** than DuckDB 1t at this size.
-- **Q4** — `(year, brand)` group-by plus string equality filters; hash + string work keeps verified near DuckDB and ~20% above bare.
+**SSB Q2** (selective scalar sum, 1.5M rows) — Verified **~10× faster than DuckDB** and essentially tied with bare (~1.6 ms). Almost no allocation; the loop is a tight filter + native arithmetic that LLVM can fuse. DuckDB pays interpreter/vector setup on a query that does very little work per matching row.
 
-### What it takes to match bare consistently
+**SSB Q3** (another selective sum, 1.5M rows) — Same pattern as Q2: **~2.7× faster than DuckDB**, near bare (~2.2 ms). Native integer ops + minimal column footprint.
 
-Bare is hand-tuned columnar Rust (minimal columns, direct indexing, no proof/runtime wrapper). Verified adds `Object<ColsNative>`, Dafny codegen, and general-purpose agg maps. Closing the gap everywhere means more **schema-driven** pipeline work, not per-query hacks: SQL column projection (done), native agg push for all group-by shapes (2-key string/u32 done; 3-key still on functional maps), skip Dafny result materialization on the engine boundary (`BenchFinish`, done for benchmarks), and eventually tighter encodings for low-cardinality strings where the schema allows it.
+**TPC-H Q1** (two-key string group-by, ~6M rows) — Verified **~14× faster than DuckDB** (~35 ms vs ~480 ms) but **~1.3× slower than bare** (~27 ms). Gain vs DuckDB: `NativeAggStrMap` + schema-driven `AggPushStr_*` — hash aggregation stays in Rust instead of DuckDB’s general group-by. Gap vs bare: ghost map bookkeeping in Dafny codegen and string-key hashing through the verified API.
+
+**TPC-H Q6** (filtered revenue sum, ~6M rows) — Verified **~1.8× faster than DuckDB** and slightly **faster than bare** (~37 ms vs ~41 ms / ~65 ms DuckDB). Selective scan with native mul/add; proof overhead is negligible when most rows are filtered early.
+
+### From verified Dafny to fast Rust
+
+Naive Dafny output is correct but slow: unbounded `int`/`nat`, functional `map` group-bys, sequence comprehensions, and `Object`/`Seq` wrappers everywhere — easy for Z3, bad for LLVM. The pipeline closes much of that gap **without breaking the proof**:
+
+- **SQL → `MethodSpec`** — deterministic transpile; the agent only edits `RunQuery` under fixed `requires ValidCols` / `ensures res == MethodSpec(cols)`.
+- **Native externs** — `NativeU32`/`NativeU64`/`NativeI64`, `AddU64`, `MulU64U32`, etc., so hot arithmetic stays fixed-width in Rust.
+- **Native aggregation** — `NativeAggMap` / `NativeAggStrMap` + schema-driven `AggPush_*` replace Dafny `map` updates in group-by queries (TPC-H Q1, SSB Q4/Q5).
+- **Column projection** — load only columns the query touches (same footprint as bare baseline).
+- **Postprocessor** — forward scan, drop dead ghost tuples, `BenchFinish()` skips `ToMap()` materialization at the engine boundary.
+- **Validation** — Dafny/Z3 proves `RunQuery` refines `MethodSpec`; Rust is Dafny-translated + postprocessed; benchmark harness checks result equality against DuckDB on sampled runs.
+
+Dafny will always prefer **verified** constructs over fast ones — maps over hash tables, mathematical integers over machine words — so the agent and postprocessor must steer hot paths toward native externs; the proof contract stays the same.
 
 Reproduce the chart:
 
 ```bash
-uv run python research_loop/benchmark_scaling.py   # refresh scaling_results.json if needed
+uv run python research_loop/benchmark_scaling.py --refresh-queries 1,2,3
+uv run python research_loop/benchmark_tpch.py
 uv run python scripts/generate_benchmark_overview_plot.py
 uv run python research_loop/benchmark_verified.py # single-point check at 50k rows
 ```
