@@ -23,17 +23,16 @@ One-time setup, then run the interactive demo:
 
 ```bash
 make install
-./scripts/build_ssb_flat_dataset.sh   # generate ssb flat dataset (~6M rows on disk)
-./scripts/demo.sh                     # builds extension if needed, prepares data, opens DuckDB CLI
+./scripts/demo.sh                     # dataset + extension + prepare_data + DuckDB CLI
 ```
 
-In DuckDB shell, try Lemma on a query:
+Optional: `./scripts/demo.sh --query 1 --rows 50000` (or `DEMO_QUERY_ID`, `LEMMA_DATASET_SIZE`). Builds `ssb-dbgen` flat table on first run if missing. Clears Lemma cache, sets demo env, opens DuckDB with the extension loaded.
 
 ```sql
 SELECT lemma('SELECT SUM(LO_EXTENDEDPRICE * LO_DISCOUNT) FROM lineorder_flat WHERE ...');
 ```
 
-`demo.sh` handles extension build, dataset loading (`prepare_data`), and launching DuckDB.
+**No agent:** `./scripts/mockdemo.sh` — pre-seeded RunQuery, no LLM.
 
 ### Requirements
 - [uv](https://docs.astral.sh/uv/) — Python package manager
